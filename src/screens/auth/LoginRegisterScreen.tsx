@@ -5,6 +5,14 @@ import { AuthStackParamList } from '../../navigation/AuthStack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text } from '../../components/common/Text';
 
+// Color constants
+const COLORS = {
+  TEXT: '#483847',
+  SCREEN_SKIN: '#EFD7ED',
+  BUTTON: '#B378AF',
+  PLACEHOLDER: '#6B7280',
+};
+
 type Props = NativeStackScreenProps<AuthStackParamList, 'LoginRegister'>;
 
 export const LoginRegisterScreen = ({ navigation }: Props) => {
@@ -13,24 +21,24 @@ export const LoginRegisterScreen = ({ navigation }: Props) => {
   };
 
   const handleLoginPress = () => {
-    navigation.navigate('LoginInitial');
+    navigation.navigate('LoginDetectingFace');
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: '#E6D7FF' }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: COLORS.SCREEN_SKIN }]}>
       <View style={styles.content}>
-        <View style={styles.spacer} />
         <View style={styles.buttonContainer}>
-          <Text style={styles.promptText}>new user?</Text>
+          <Text style={styles.promptText}>New user?</Text>
           <TouchableOpacity 
             style={styles.button}
             onPress={handleRegisterPress}
           >
             <Text style={styles.buttonText}>REGISTER</Text>
           </TouchableOpacity>
+          
           <Text style={styles.promptText}>Already have an account?</Text>
           <TouchableOpacity 
-            style={styles.button}
+            style={[styles.button, styles.loginButton]}
             onPress={handleLoginPress}
           >
             <Text style={styles.buttonText}>LOGIN</Text>
@@ -47,21 +55,21 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-  },
-  spacer: {
-    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 40,
   },
   buttonContainer: {
-    paddingBottom: 100,
-    paddingHorizontal: 40,
-    gap: 30,
+    gap: 17, // Space between text and button pairs
   },
   button: {
-    backgroundColor: '#9F7AEA',
+    backgroundColor: COLORS.BUTTON,
     paddingVertical: 15,
     borderRadius: 25,
     alignItems: 'center',
     elevation: 2,
+  },
+  loginButton: {
+    backgroundColor: COLORS.BUTTON,
   },
   buttonText: {
     color: '#FFFFFF',
@@ -71,8 +79,9 @@ const styles = StyleSheet.create({
   },
   promptText: {
     fontSize: 14,
-    color: '#1F2937',
-    textAlign: 'center',
-    marginBottom: 10,
+    color: COLORS.TEXT,
+    textAlign: 'left', // Left aligned
+    marginLeft: 1,
+    marginBottom: 0, // Remove space completely
   },
 });

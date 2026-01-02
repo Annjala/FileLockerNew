@@ -6,16 +6,14 @@ import { RegisterScreen } from '../screens/auth/RegisterScreen';
 import { BiometricSetupScreen } from '../screens/auth/BiometricSetupScreen';
 import { DetectingFaceScreen } from '../screens/auth/DetectingFaceScreen';
 import { CheckingLivenessScreen } from '../screens/auth/CheckingLivenessScreen';
-import { LoginInitialScreen } from '../screens/auth/LoginInitialScreen';
 import { LoginDetectingFaceScreen } from '../screens/auth/LoginDetectingFaceScreen';
-import { LoginFormScreen } from '../screens/auth/LoginFormScreen';
+import { LoginCheckingLivenessScreen } from '../screens/auth/LoginCheckingLivenessScreen';
 
 export type AuthStackParamList = {
   LoginRegister: undefined;
   Login: undefined;
-  LoginInitial: undefined;
   LoginDetectingFace: undefined;
-  LoginForm: undefined;
+  LoginCheckingLiveness: undefined;
   Register: undefined;
   DetectingFace: undefined;
   CheckingLiveness: undefined;
@@ -33,9 +31,8 @@ export const AuthStack = () => {
       }}
     >
       <Stack.Screen name="LoginRegister" component={LoginRegisterScreen} />
-      <Stack.Screen name="LoginInitial" component={LoginInitialScreen} />
       <Stack.Screen name="LoginDetectingFace" component={LoginDetectingFaceScreen} />
-      <Stack.Screen name="LoginForm" component={LoginFormScreen} />
+      <Stack.Screen name="LoginCheckingLiveness" component={LoginCheckingLivenessScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
       <Stack.Screen name="DetectingFace" component={DetectingFaceScreen} />

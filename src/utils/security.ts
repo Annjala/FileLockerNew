@@ -7,7 +7,7 @@ import { Platform } from 'react-native';
 // Keychain service name for storing the encryption key
 const KEYCHAIN_SERVICE = 'com.securevault.encryptionkey';
 
-// Generate a secure random encryption key
+// Generate a secure random encryption key (shorter for SecureStore)
 export const generateEncryptionKey = async (): Promise<string> => {
   // Generate a 32-byte (256-bit) key for AES-256
   const randomBytes = Crypto.getRandomBytes(32);
@@ -16,18 +16,23 @@ export const generateEncryptionKey = async (): Promise<string> => {
     Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('')
   );
   
-  return key.substring(0, 64); // Ensure we have exactly 64 hex chars (256 bits)
+  // Return only 32 characters (128 bits) to stay within SecureStore limits
+  // Still secure for mobile app usage
+  return key.substring(0, 32);
 };
 
 // Store the encryption key securely in the device's keychain
 export const storeEncryptionKey = async (key: string, userId: string): Promise<boolean> => {
   try {
+    // Use shorter key name to reduce storage size
+    const keyName = `ek_${userId.substring(0, 8)}`; // Use first 8 chars of userId
+    
     // On Android, we'll use the Android Keystore via expo-secure-store
     // On iOS, we'll use the Keychain
     if (Platform.OS === 'android') {
       // On Android, we can use SecureStore with the ACCESS_CONTROL option
       await SecureStore.setItemAsync(
-        `encryption_key_${userId}`,
+        keyName,
         key,
         {
           keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
@@ -37,7 +42,7 @@ export const storeEncryptionKey = async (key: string, userId: string): Promise<b
     } else {
       // On iOS, we'll use react-native-keychain for better security
       await Keychain.setGenericPassword(
-        `encryption_key_${userId}`,
+        keyName,
         key,
         {
           service: KEYCHAIN_SERVICE,
@@ -57,8 +62,10 @@ export const storeEncryptionKey = async (key: string, userId: string): Promise<b
 // Retrieve the encryption key from secure storage
 export const getEncryptionKey = async (userId: string): Promise<string | null> => {
   try {
+    const keyName = `ek_${userId.substring(0, 8)}`; // Match the shortened key name
+    
     if (Platform.OS === 'android') {
-      const key = await SecureStore.getItemAsync(`encryption_key_${userId}`, {
+      const key = await SecureStore.getItemAsync(keyName, {
         keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
         requireAuthentication: true,
       });

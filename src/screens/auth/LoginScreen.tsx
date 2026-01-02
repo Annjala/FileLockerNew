@@ -3,11 +3,16 @@ import { View, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityIndicator
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../../navigation/AuthStack';
 import { useAuth } from '../../contexts/AuthContext';
-import { useTheme } from '../../theme/ThemeContext';
-import { Ionicons } from '@expo/vector-icons';
-import { Text } from '../../components/common/Text';
-import { Button } from '../../components/common/Button';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Text } from '../../components/common/Text';
+
+// Color constants
+const COLORS = {
+  TEXT: '#483847',
+  SCREEN_SKIN: '#EFD7ED',
+  BUTTON: '#B378AF',
+  PLACEHOLDER: '#6B7280',
+};
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
@@ -15,8 +20,6 @@ export const LoginScreen = ({ navigation }: Props) => {
   const [email, setEmail] = useState('');
   const [pin, setPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [showPin, setShowPin] = useState(false);
-  const { colors } = useTheme();
   const { signIn } = useAuth();
 
   const handleLogin = async () => {
@@ -36,60 +39,30 @@ export const LoginScreen = ({ navigation }: Props) => {
     }
   };
 
-  const navigateToRegister = () => {
-    navigation.navigate('Register');
-  };
-
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: '#E6D7FF' }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: COLORS.SCREEN_SKIN }]}>
       <View style={styles.content}>
-        <View style={styles.header}>
-          <Ionicons name="lock-closed" size={60} color="#6B21A8" />
-          <Text style={[styles.title, { color: '#1F2937' }]}>Secure Vault</Text>
-          <Text style={[styles.subtitle, { color: '#6B7280' }]}>
-            Sign in to access your secure files
-          </Text>
-        </View>
+        <View style={styles.formContainer}>
+          <TextInput
+            style={styles.input}
+            placeholder="Email"
+            placeholderTextColor={COLORS.PLACEHOLDER}
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+          />
 
-        <View style={styles.form}>
-          <View style={[styles.inputContainer, { borderColor: '#D1D5DB' }]}>
-            <Ionicons name="person-outline" size={20} color="#6B7280" style={styles.inputIcon} />
-            <TextInput
-              style={[styles.input, { color: '#1F2937' }]}
-              placeholder="enter Email"
-              placeholderTextColor="#6B7280"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-            />
-          </View>
-
-          <View style={[styles.inputContainer, { borderColor: '#D1D5DB' }]}>
-            <Ionicons name="lock-closed-outline" size={20} color="#6B7280" style={styles.inputIcon} />
-            <TextInput
-              style={[styles.input, { color: '#1F2937' }]}
-              placeholder="enter PIN"
-              placeholderTextColor="#6B7280"
-              value={pin}
-              onChangeText={setPin}
-              secureTextEntry={!showPin}
-              autoCapitalize="none"
-              maxLength={4}
-              keyboardType="numeric"
-            />
-            <TouchableOpacity 
-              style={styles.eyeIcon} 
-              onPress={() => setShowPin(!showPin)}
-            >
-              <Ionicons 
-                name={showPin ? 'eye-off-outline' : 'eye-outline'} 
-                size={20} 
-                color="#6B7280" 
-              />
-            </TouchableOpacity>
-          </View>
+          <TextInput
+            style={styles.input}
+            placeholder="PIN"
+            placeholderTextColor={COLORS.PLACEHOLDER}
+            value={pin}
+            onChangeText={setPin}
+            secureTextEntry
+            keyboardType="numeric"
+          />
 
           <TouchableOpacity 
             style={styles.loginButton}
@@ -100,27 +73,12 @@ export const LoginScreen = ({ navigation }: Props) => {
               {isLoading ? 'Signing In...' : 'LOGIN'}
             </Text>
           </TouchableOpacity>
-
-          <TouchableOpacity style={styles.forgotPassword}>
-            <Text style={[styles.forgotPasswordText, { color: '#6B21A8' }]}>
-              Forgot PIN?
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.footer}>
-          <Text style={[styles.footerText, { color: '#6B7280' }]}>
-            Don't have an account?{' '}
-          </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-            <Text style={[styles.signUpText, { color: '#6B21A8' }]}>Register</Text>
-          </TouchableOpacity>
         </View>
       </View>
 
       {isLoading && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#6B21A8" />
+          <ActivityIndicator size="large" color={COLORS.BUTTON} />
         </View>
       )}
     </SafeAreaView>
@@ -133,79 +91,33 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 20,
     justifyContent: 'center',
+    paddingHorizontal: 40,
   },
-  header: {
-    alignItems: 'center',
-    marginBottom: 40,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
-  form: {
-    width: '100%',
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 8,
-    marginBottom: 16,
-    paddingHorizontal: 12,
-    height: 50,
-  },
-  inputIcon: {
-    marginRight: 10,
+  formContainer: {
+    gap: 20,
   },
   input: {
-    flex: 1,
-    height: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 15,
     fontSize: 16,
-  },
-  eyeIcon: {
-    padding: 8,
+    color: COLORS.TEXT,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
   },
   loginButton: {
-    backgroundColor: '#9F7AEA',
-    height: 50,
-    borderRadius: 8,
-    justifyContent: 'center',
+    backgroundColor: COLORS.BUTTON,
+    paddingVertical: 15,
+    borderRadius: 25,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 10,
   },
   loginButtonText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
-  },
-  forgotPassword: {
-    alignSelf: 'flex-end',
-    marginTop: 12,
-  },
-  forgotPasswordText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 24,
-  },
-  footerText: {
-    fontSize: 14,
-  },
-  signUpText: {
-    fontSize: 14,
-    fontWeight: '600',
+    letterSpacing: 0.5,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,

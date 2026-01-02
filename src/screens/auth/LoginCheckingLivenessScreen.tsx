@@ -56,15 +56,15 @@ const loaderStyles = StyleSheet.create({
   },
 });
 
-type Props = NativeStackScreenProps<AuthStackParamList, 'LoginDetectingFace'>;
+type Props = NativeStackScreenProps<AuthStackParamList, 'LoginCheckingLiveness'>;
 
-export const LoginDetectingFaceScreen = ({ navigation }: Props) => {
+export const LoginCheckingLivenessScreen = ({ navigation }: Props) => {
   const { colors } = useTheme();
   const [isLoading, setIsLoading] = useState(true);
 
   const handlePress = () => {
     setIsLoading(false);
-    navigation.navigate('LoginCheckingLiveness');
+    navigation.navigate('Login');
   };
 
   return (
@@ -75,7 +75,7 @@ export const LoginDetectingFaceScreen = ({ navigation }: Props) => {
         activeOpacity={1}
       >
         <View style={styles.content}>
-          <Text style={styles.title}>DETECTING FACE</Text>
+          <Text style={styles.title}>CHECKING LIVENESS</Text>
           {isLoading ? <CustomLoader /> : null}
           <Text style={styles.subtitle}>PLEASE WAIT FOR</Text>
           <Text style={styles.subtitle}>A MOMENT</Text>
