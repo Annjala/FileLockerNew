@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, SafeAreaView, Alert, ActivityIndicator, TextInput, Modal } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, SafeAreaView, Alert, ActivityIndicator, TextInput, Modal, FlatList } from 'react-native';
 import { Text } from '../../components/common/Text';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
@@ -9,10 +9,12 @@ import {
 } from '@expo-google-fonts/grandstander';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { Linking } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import { encryptFile, getEncryptionKey, hasEncryptionKey, generateEncryptionKey, storeEncryptionKey } from '../../utils/security';
+import { encryptFile, getEncryptionKey, hasEncryptionKey, generateEncryptionKey, storeEncryptionKey, decryptFile } from '../../utils/security';
 import { uploadFile } from '../../lib/supabase';
 import { useNavigation } from '@react-navigation/native';
+import { supabase } from '../../lib/supabase';
 
 const COLORS = {
   TEXT: '#483847',
@@ -27,6 +29,9 @@ export const HomeScreen = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [showPinPrompt, setShowPinPrompt] = useState(false);
   const [pinInput, setPinInput] = useState('');
+  const [showFilesModal, setShowFilesModal] = useState(false);
+  const [files, setFiles] = useState<any[]>([]);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const { user } = useAuth();
   const navigation = useNavigation();
   
@@ -40,13 +45,26 @@ export const HomeScreen = () => {
 
   const pickDocument = async () => {
     try {
+      // Clear any previous selection
+      setSelectedFile(null);
+      
       const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
+        type: [
+          'image/*',
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'text/plain',
+          'application/zip',
+        ],
         copyToCacheDirectory: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         setSelectedFile(result.assets[0]);
+        console.log('Selected file:', result.assets[0].name, 'URI:', result.assets[0].uri);
       }
     } catch (error) {
       console.error('Error picking document:', error);
@@ -101,6 +119,24 @@ export const HomeScreen = () => {
       // Upload the encrypted file
       await uploadFile(selectedFile.uri, user.id, encryptionKey);
 
+      // Delete the original file from device after successful upload
+      try {
+        console.log('Attempting to delete file:', selectedFile.uri);
+        await FileSystem.deleteAsync(selectedFile.uri);
+        console.log('File deleted successfully from device');
+        
+        // Verify file is actually deleted
+        const fileExists = await FileSystem.getInfoAsync(selectedFile.uri);
+        if (fileExists.exists) {
+          console.warn('Warning: File still exists after deletion attempt');
+        } else {
+          console.log('Verified: File no longer exists on device');
+        }
+      } catch (deleteError) {
+        console.error('Error deleting original file:', deleteError);
+        Alert.alert('Warning', 'File uploaded but original file could not be deleted');
+      }
+
       Alert.alert('Success', 'File uploaded and encrypted successfully!');
       setSelectedFile(null);
       setPinInput('');
@@ -108,6 +144,89 @@ export const HomeScreen = () => {
       Alert.alert('Error', 'Failed to upload file. Please try again.');
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const loadFiles = async () => {
+    try {
+      setIsLoadingFiles(true);
+      const { data, error } = await supabase
+        .from('files')
+        .select('*')
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setFiles(data || []);
+    } catch (error) {
+      console.error('Error loading files:', error);
+      Alert.alert('Error', 'Failed to load files');
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+  };
+
+  const getFileIcon = (mimeType: string) => {
+    if (mimeType.startsWith('image/')) return 'image';
+    if (mimeType.startsWith('video/')) return 'videocam';
+    if (mimeType.startsWith('audio/')) return 'musical-notes';
+    if (mimeType.includes('pdf')) return 'document-text';
+    if (mimeType.includes('zip') || mimeType.includes('rar')) return 'archive';
+    return 'document';
+  };
+
+  const handleViewFile = async (file: any) => {
+    try {
+      if (!user?.id) {
+        Alert.alert('Error', 'User not authenticated');
+        return;
+      }
+
+      // Get encryption key
+      const encryptionKey = await getEncryptionKey(user.id);
+      
+      if (!encryptionKey) {
+        Alert.alert('Error', 'Failed to get encryption key');
+        return;
+      }
+
+      // Decrypts file data directly from Supabase (no download needed)
+      const { data, error } = await supabase.storage
+        .from('user-files')
+        .download(file.file_path);
+
+      if (error) {
+        console.error('Error accessing file:', error);
+        Alert.alert('Error', 'Failed to access file');
+        return;
+      }
+
+      // Decrypts file data
+      const decryptedData = await decryptFile(data, encryptionKey, file.iv);
+      
+      // Display decrypted content in a modal for better viewing
+      Alert.prompt(
+        'File Content',
+        `File "${file.file_name}" decrypted successfully!\n\nFirst 100 characters:\n${decryptedData.substring(0, 100)}...\n\n${decryptedData.substring(100, 200)}...`,
+        [
+          {
+            text: 'Close',
+            onPress: () => {},
+          }
+        ]
+      );
+
+    } catch (error) {
+      console.error('Error viewing file:', error);
+      Alert.alert('Error', 'Failed to process file');
     }
   };
 
@@ -134,7 +253,10 @@ export const HomeScreen = () => {
           </TouchableOpacity>
         )}
         
-        <TouchableOpacity style={styles.optionButton} onPress={() => navigation.navigate('Files' as never)}>
+        <TouchableOpacity style={styles.optionButton} onPress={() => {
+          loadFiles();
+          setShowFilesModal(true);
+        }}>
           <Text style={styles.optionText}>View Files</Text>
         </TouchableOpacity>
         
@@ -217,6 +339,60 @@ export const HomeScreen = () => {
                 <Text style={styles.confirmButtonText}>Upload</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Files Modal */}
+      <Modal
+        visible={showFilesModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFilesModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.filesModalContent}>
+            <Text style={styles.modalTitle}>My Files</Text>
+            {isLoadingFiles ? (
+              <ActivityIndicator size="large" color={COLORS.BUTTON} />
+            ) : files.length === 0 ? (
+              <View style={styles.emptyFilesState}>
+                <Ionicons name="folder-open-outline" size={60} color={COLORS.TEXT} />
+                <Text style={styles.emptyFilesText}>No files uploaded yet</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={files}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity 
+                    style={styles.fileItem}
+                    onPress={() => handleViewFile(item)}
+                  >
+                    <View style={styles.fileIconContainer}>
+                      <Ionicons name={getFileIcon(item.mime_type)} size={24} color={COLORS.BUTTON} />
+                    </View>
+                    <View style={styles.fileInfo}>
+                      <Text style={styles.fileName}>{item.file_name}</Text>
+                      <Text style={styles.fileSize}>{formatFileSize(item.size)}</Text>
+                      {item.is_encrypted && (
+                        <View style={styles.encryptedBadge}>
+                          <Ionicons name="lock-closed" size={12} color={COLORS.BUTTON} />
+                          <Text style={styles.encryptedText}>Encrypted</Text>
+                        </View>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                )}
+                style={styles.filesList}
+              />
+            )}
+            <TouchableOpacity 
+              style={styles.closeModalButton} 
+              onPress={() => setShowFilesModal(false)}
+            >
+              <Text style={styles.closeModalButtonText}>Close</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
