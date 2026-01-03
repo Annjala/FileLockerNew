@@ -33,15 +33,15 @@
         "android.permission.USE_FINGERPRINT"
       ]
     },
-    "web": {
-    },
+    "web": {},
     "plugins": [
       [
         "expo-local-authentication",
         {
           "faceIDPermission": "Allow SecureVault to use Face ID."
         }
-      ]
+      ],
+      "expo-secure-store"
     ]
   }
 }

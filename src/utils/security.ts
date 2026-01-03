@@ -138,7 +138,7 @@ export const encryptFile = async (
 
 // Decrypt a file using AES-256-CBC (proper implementation)
 export const decryptFile = async (
-  encryptedData: string, 
+  encryptedData: any, 
   key: string, 
   iv: string
 ): Promise<string> => {
@@ -147,11 +147,38 @@ export const decryptFile = async (
     // This means files will be downloaded as encrypted but that's expected for now
     // The "encrypted" data is actually the original file content in our current implementation
     
+    // Convert the data to string if it's a Blob
+    let dataAsString = '';
+    if (encryptedData instanceof Blob) {
+      // Convert Blob to base64 string (without data URL prefix)
+      const reader = new FileReader();
+      await new Promise((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          // Remove the data URL prefix to get pure base64
+          if (result.startsWith('data:')) {
+            const base64Data = result.split(',')[1];
+            dataAsString = base64Data;
+          } else {
+            dataAsString = result;
+          }
+          resolve(dataAsString);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(encryptedData);
+      });
+    } else if (typeof encryptedData === 'string') {
+      dataAsString = encryptedData;
+    } else {
+      // Convert object to string representation
+      dataAsString = String(encryptedData);
+    }
+    
     // IMPORTANT: This is a placeholder. In production, use a proper encryption library
     // that provides authenticated encryption (like AES-GCM) and proper decryption
     
     console.log('Decrypting file - returning original content as-is');
-    return encryptedData; // In reality, this would be the decrypted data
+    return dataAsString;
   } catch (error) {
     console.error('Error decrypting file:', error);
     // Don't throw error - just return empty string to prevent crashing

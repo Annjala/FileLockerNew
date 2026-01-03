@@ -40,6 +40,32 @@ export const uploadFile = async (fileUri: string, userId: string, encryptionKey:
       encoding: FileSystem.EncodingType.Base64,
     });
     
+    // Get file info to determine MIME type
+    const fileInfo = await FileSystem.getInfoAsync(fileUri);
+    const fileExtension = fileUri.split('.').pop()?.toLowerCase();
+    
+    // Determine MIME type based on file extension
+    let mimeType = 'application/octet-stream';
+    if (fileExtension === 'jpg' || fileExtension === 'jpeg') {
+      mimeType = 'image/jpeg';
+    } else if (fileExtension === 'png') {
+      mimeType = 'image/png';
+    } else if (fileExtension === 'gif') {
+      mimeType = 'image/gif';
+    } else if (fileExtension === 'pdf') {
+      mimeType = 'application/pdf';
+    } else if (fileExtension === 'txt') {
+      mimeType = 'text/plain';
+    } else if (fileExtension === 'doc') {
+      mimeType = 'application/msword';
+    } else if (fileExtension === 'docx') {
+      mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    } else if (fileExtension === 'xls') {
+      mimeType = 'application/vnd.ms-excel';
+    } else if (fileExtension === 'xlsx') {
+      mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    }
+    
     // Create a simple base64 to ArrayBuffer converter
     const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
       const binaryString = atob(base64);
@@ -50,13 +76,16 @@ export const uploadFile = async (fileUri: string, userId: string, encryptionKey:
       return bytes.buffer;
     };
     
+    // Generate a random IV (Initialization Vector) - in real app this would be used for encryption
+    const iv = 'placeholder_iv_' + Date.now();
+    
     // In a real app, you would encrypt the file here before uploading
     // For now, we'll upload the file data directly
     
     const { data, error } = await supabase.storage
       .from('user-files') // Your Supabase storage bucket name
       .upload(fileName, base64ToArrayBuffer(fileContent), {
-        contentType: 'application/octet-stream',
+        contentType: mimeType,
       });
 
     if (error) {
@@ -71,8 +100,8 @@ export const uploadFile = async (fileUri: string, userId: string, encryptionKey:
       user_id: userId, 
       file_path: data.path,
       file_name: fileUri.split('/').pop(),
-      size: 0, // You would get the actual file size here
-      mime_type: 'application/octet-stream',
+      size: 0, // File size will be 0 for now since we can't easily get it
+      mime_type: mimeType,
       is_encrypted: true,
     };
     

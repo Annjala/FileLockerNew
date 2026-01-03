@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, SafeAreaView, Alert, ActivityIndicator, TextInput, Modal, FlatList } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, SafeAreaView, Alert, ActivityIndicator, TextInput, Modal, FlatList, Image, ScrollView } from 'react-native';
 import { Text } from '../../components/common/Text';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
@@ -10,6 +10,7 @@ import {
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Linking } from 'react-native';
+import * as Sharing from 'expo-sharing';
 import * as SecureStore from 'expo-secure-store';
 import { encryptFile, getEncryptionKey, hasEncryptionKey, generateEncryptionKey, storeEncryptionKey, decryptFile } from '../../utils/security';
 import { uploadFile } from '../../lib/supabase';
@@ -32,6 +33,9 @@ export const HomeScreen = () => {
   const [showFilesModal, setShowFilesModal] = useState(false);
   const [files, setFiles] = useState<any[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const [showFileViewer, setShowFileViewer] = useState(false);
+  const [viewingFile, setViewingFile] = useState<any>(null);
+  const [fileContent, setFileContent] = useState<string>('');
   const { user } = useAuth();
   const navigation = useNavigation();
   
@@ -210,19 +214,24 @@ export const HomeScreen = () => {
       }
 
       // Decrypts file data
-      const decryptedData = await decryptFile(data, encryptionKey, file.iv);
+      const decryptedData = await decryptFile(data, encryptionKey, 'placeholder_iv');
       
-      // Display decrypted content in a modal for better viewing
-      Alert.prompt(
-        'File Content',
-        `File "${file.file_name}" decrypted successfully!\n\nFirst 100 characters:\n${decryptedData.substring(0, 100)}...\n\n${decryptedData.substring(100, 200)}...`,
-        [
-          {
-            text: 'Close',
-            onPress: () => {},
-          }
-        ]
-      );
+      // Check if decrypted data is valid
+      if (!decryptedData || decryptedData.length === 0) {
+        Alert.alert('Error', 'File content could not be decrypted');
+        return;
+      }
+      
+      // Log debugging information
+      console.log('File info:', file);
+      console.log('File content length:', decryptedData.length);
+      console.log('File content type:', typeof decryptedData);
+      console.log('First 50 chars:', decryptedData.substring(0, 50));
+      
+      // Set the viewing file and content
+      setViewingFile(file);
+      setFileContent(decryptedData);
+      setShowFileViewer(true);
 
     } catch (error) {
       console.error('Error viewing file:', error);
@@ -339,6 +348,50 @@ export const HomeScreen = () => {
                 <Text style={styles.confirmButtonText}>Upload</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* File Viewer Modal */}
+      <Modal
+        visible={showFileViewer}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFileViewer(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.fileViewerContent}>
+            <View style={styles.fileViewerHeader}>
+              <Text style={styles.fileViewerTitle}>{viewingFile?.file_name}</Text>
+              <TouchableOpacity 
+                style={styles.closeViewerButton}
+                onPress={() => setShowFileViewer(false)}
+              >
+                <Ionicons name="close" size={24} color={COLORS.TEXT} />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.fileViewerBody}>
+              {viewingFile?.mime_type.startsWith('image/') || viewingFile?.file_name?.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                <Image 
+                  source={{ uri: `data:image/jpeg;base64,${fileContent}` }}
+                  style={styles.fileViewerImage}
+                  resizeMode="contain"
+                />
+              ) : viewingFile?.mime_type.includes('text') || viewingFile?.file_name?.match(/\.(txt)$/i) ? (
+                <View style={styles.textContentView}>
+                  <Text style={styles.textContent}>{fileContent}</Text>
+                </View>
+              ) : (
+                <View style={styles.fileInfoView}>
+                  <Ionicons name="document" size={60} color={COLORS.BUTTON} />
+                  <Text style={styles.fileInfoText}>File Type: {viewingFile?.mime_type}</Text>
+                  <Text style={styles.fileInfoText}>Size: {formatFileSize(viewingFile?.size || 0)}</Text>
+                  <Text style={styles.fileInfoText}>File Name: {viewingFile?.file_name}</Text>
+                  <Text style={styles.fileInfoText}>This file type cannot be displayed within the app.</Text>
+                </View>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -602,5 +655,58 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Grandstander_700Bold',
     color: '#FFFFFF',
+  },
+  fileViewerContent: {
+    backgroundColor: COLORS.PANEL,
+    borderRadius: 20,
+    margin: 20,
+    maxHeight: '80%',
+    flex: 1,
+  },
+  fileViewerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.TEXT,
+  },
+  fileViewerTitle: {
+    fontSize: 18,
+    fontFamily: 'Grandstander_700Bold',
+    color: COLORS.TEXT,
+    flex: 1,
+  },
+  closeViewerButton: {
+    padding: 5,
+  },
+  fileViewerBody: {
+    flex: 1,
+    padding: 20,
+  },
+  fileViewerImage: {
+    width: '100%',
+    height: 300,
+    borderRadius: 10,
+  },
+  textContentView: {
+    flex: 1,
+  },
+  textContent: {
+    fontSize: 14,
+    color: COLORS.TEXT,
+    lineHeight: 20,
+  },
+  fileInfoView: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  fileInfoText: {
+    fontSize: 16,
+    color: COLORS.TEXT,
+    marginTop: 10,
+    textAlign: 'center',
   },
 });
