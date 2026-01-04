@@ -18,7 +18,7 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function AppContent() {
-  const { user, isLoading, isAuthenticated } = useAuth();
+  const { user, isLoading, isAuthenticated, isAppLocked } = useAuth();
 
   if (isLoading) {
     return <LoadingScreen />;
@@ -27,10 +27,10 @@ function AppContent() {
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {isAuthenticated ? (
-          <Stack.Screen name="Main" component={MainStack} />
-        ) : (
+        {isAppLocked || !isAuthenticated ? (
           <Stack.Screen name="Auth" component={AuthStack} />
+        ) : (
+          <Stack.Screen name="Main" component={MainStack} />
         )}
       </Stack.Navigator>
     </NavigationContainer>

@@ -22,7 +22,7 @@ import RNPDFLib from 'react-native-pdf-lib';
 
 export const HomeScreen = () => {
   const { colors } = useTheme();
-  const { user, verifyPin } = useAuth();
+  const { user, verifyPin, resetInactivityTimer } = useAuth();
   const [selectedFile, setSelectedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showPinPrompt, setShowPinPrompt] = useState(false);
@@ -46,6 +46,19 @@ export const HomeScreen = () => {
   let [fontsLoaded] = useFonts({
     Grandstander_700Bold,
   });
+
+  // Reset inactivity timer on user interactions
+  React.useEffect(() => {
+    const handleUserActivity = () => {
+      resetInactivityTimer();
+    };
+
+    // Add event listeners for user activity
+    // Note: In React Native, we'll use touch events on the main container
+    return () => {
+      // Cleanup will be handled by the component unmount
+    };
+  }, [resetInactivityTimer]);
 
   if (!fontsLoaded) {
     return null;
@@ -787,10 +800,14 @@ export const HomeScreen = () => {
     }
   };
 
+  const handleUserInteraction = () => {
+    resetInactivityTimer();
+  };
+
   const renderHome = () => (
     <View style={styles.content}>
       <View style={styles.optionsContainer}>
-        <TouchableOpacity style={styles.optionButton} onPress={pickDocument}>
+        <TouchableOpacity style={styles.optionButton} onPress={() => { pickDocument(); handleUserInteraction(); }}>
           <Text style={styles.optionText}>
             {selectedFile ? `Selected: ${selectedFile.name}` : 'Upload File'}
           </Text>
@@ -799,7 +816,7 @@ export const HomeScreen = () => {
         {selectedFile && (
           <TouchableOpacity 
             style={[styles.optionButton, styles.uploadButton]} 
-            onPress={handleUpload}
+            onPress={() => { handleUpload(); handleUserInteraction(); }}
             disabled={isUploading}
           >
             {isUploading ? (
@@ -810,17 +827,11 @@ export const HomeScreen = () => {
           </TouchableOpacity>
         )}
         
-        <TouchableOpacity style={styles.optionButton} onPress={() => {
-          loadFiles();
-          setShowFilesModal(true);
-        }}>
+        <TouchableOpacity style={styles.optionButton} onPress={() => { loadFiles(); setShowFilesModal(true); handleUserInteraction(); }}>
           <Text style={styles.optionText}>View Files</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.optionButton} onPress={() => {
-          loadFiles();
-          setShowDeleteModal(true);
-        }}>
+        <TouchableOpacity style={styles.optionButton} onPress={() => { loadFiles(); setShowDeleteModal(true); handleUserInteraction(); }}>
           <Text style={styles.optionText}>Delete Files</Text>
         </TouchableOpacity>
       </View>
@@ -835,7 +846,7 @@ export const HomeScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.mainContent}>
+      <View style={styles.mainContent} onTouchStart={handleUserInteraction}>
         {renderHome()}
       </View>
 

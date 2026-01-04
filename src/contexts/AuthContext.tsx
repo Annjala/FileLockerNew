@@ -20,6 +20,12 @@ type AuthContextData = {
   setupBiometricAuth: () => Promise<boolean>;
   authenticateWithBiometrics: () => Promise<boolean>;
   verifyPin: (pin: string) => Promise<boolean>;
+  setAutoLockTime: (minutes: number) => void;
+  getAutoLockTime: () => number;
+  resetInactivityTimer: () => void;
+  lockApp: () => void;
+  unlockApp: () => void;
+  isAppLocked: boolean;
 };
 
 const AuthContext = createContext<AuthContextData>({} as AuthContextData);
@@ -32,6 +38,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isBiometricSetup, setIsBiometricSetup] = useState(false);
+  const [autoLockTime, setAutoLockTimeState] = useState(1); // Default 1 minute
+  const [isAppLocked, setIsAppLocked] = useState(false);
+  const [inactivityTimer, setInactivityTimer] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Check if user is logged in on app start
@@ -87,6 +96,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           id: data.user.id,
           username: username,
         });
+        
+        // If we were locked, now unlock
+        if (isAppLocked) {
+          setIsAppLocked(false);
+          resetInactivityTimer();
+        }
       }
     } catch (error) {
       console.error('Error signing in:', error);
@@ -206,6 +221,98 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Auto-lock functionality
+  const setAutoLockTime = (minutes: number) => {
+    setAutoLockTimeState(minutes);
+    // Store in SecureStore for persistence
+    SecureStore.setItemAsync('autoLockTime', minutes.toString());
+    // Reset timer with new duration
+    resetInactivityTimer();
+  };
+
+  const getAutoLockTime = () => {
+    return autoLockTime;
+  };
+
+  const resetInactivityTimer = () => {
+    // Clear existing timer
+    if (inactivityTimer) {
+      clearTimeout(inactivityTimer);
+    }
+
+    // Only set timer if user is authenticated and auto-lock is enabled (time > 0)
+    if (user && autoLockTime > 0 && !isAppLocked) {
+      const timer = setTimeout(() => {
+        lockApp();
+      }, autoLockTime * 60 * 1000); // Convert minutes to milliseconds
+      
+      setInactivityTimer(timer);
+    }
+  };
+
+  const lockApp = () => {
+    setIsAppLocked(true);
+    // Clear any existing timer
+    if (inactivityTimer) {
+      clearTimeout(inactivityTimer);
+      setInactivityTimer(null);
+    }
+    // Sign out to force full login flow
+    supabase.auth.signOut();
+  };
+
+  const unlockApp = async () => {
+    // This will be called after successful authentication
+    setIsAppLocked(false);
+    resetInactivityTimer();
+  };
+
+  // Update the signIn function to handle unlock
+  const signInWithUnlock = async (username: string, pin: string) => {
+    try {
+      await signIn(username, pin);
+      // If we were locked, now unlock
+      if (isAppLocked) {
+        unlockApp();
+      }
+    } catch (error) {
+      console.error('Error signing in:', error);
+      throw error;
+    }
+  };
+
+  // Load auto-lock settings on startup
+  useEffect(() => {
+    const loadAutoLockSettings = async () => {
+      try {
+        const storedTime = await SecureStore.getItemAsync('autoLockTime');
+        if (storedTime) {
+          setAutoLockTimeState(parseInt(storedTime));
+        }
+      } catch (error) {
+        console.error('Error loading auto-lock settings:', error);
+      }
+    };
+
+    loadAutoLockSettings();
+  }, []);
+
+  // Reset timer when user becomes authenticated or auto-lock settings change
+  useEffect(() => {
+    if (user && !isAppLocked) {
+      resetInactivityTimer();
+    }
+  }, [user, isAppLocked, autoLockTime]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+      }
+    };
+  }, [inactivityTimer]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -218,6 +325,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setupBiometricAuth,
         authenticateWithBiometrics,
         verifyPin,
+        setAutoLockTime,
+        getAutoLockTime,
+        resetInactivityTimer,
+        lockApp,
+        unlockApp,
+        isAppLocked,
       }}
     >
       {children}

@@ -14,11 +14,13 @@ import {
 } from '@expo-google-fonts/grandstander';
 
 export const SettingsScreen = () => {
-  const { user, signOut, setupBiometricAuth } = useAuth();
+  const { user, signOut, setupBiometricAuth, setAutoLockTime, getAutoLockTime, lockApp } = useAuth();
   const { isDarkMode, colors, toggleDarkMode } = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [autoLockTime, setAutoLockTimeState] = useState(getAutoLockTime());
+  const [autoLockEnabled, setAutoLockEnabled] = useState(autoLockTime > 0);
   
   let [fontsLoaded] = useFonts({
     Grandstander_700Bold,
@@ -27,6 +29,56 @@ export const SettingsScreen = () => {
   if (!fontsLoaded) {
     return null;
   }
+
+  const handleAutoLockTimeChange = (minutes: number) => {
+    setAutoLockTimeState(minutes);
+    setAutoLockTime(minutes);
+    setAutoLockEnabled(minutes > 0);
+  };
+
+  const handleAutoLockToggle = (value: boolean) => {
+    if (value) {
+      // Show time selection popup when enabling
+      Alert.alert(
+        'Auto-Lock Settings',
+        'Select auto-lock time',
+        [
+          { text: '1 minute', onPress: () => { 
+            setAutoLockTimeState(1); 
+            setAutoLockTime(1); 
+            setAutoLockEnabled(true); 
+          }},
+          { text: '2 minutes', onPress: () => { 
+            setAutoLockTimeState(2); 
+            setAutoLockTime(2); 
+            setAutoLockEnabled(true); 
+          }},
+          { text: '5 minutes', onPress: () => { 
+            setAutoLockTimeState(5); 
+            setAutoLockTime(5); 
+            setAutoLockEnabled(true); 
+          }},
+          { text: '10 minutes', onPress: () => { 
+            setAutoLockTimeState(10); 
+            setAutoLockTime(10); 
+            setAutoLockEnabled(true); 
+          }},
+          { text: 'Cancel', style: 'cancel' }
+        ]
+      );
+    } else {
+      // Disable immediately
+      setAutoLockEnabled(false);
+      setAutoLockTimeState(0);
+      setAutoLockTime(0);
+    }
+  };
+
+  const getAutoLockDisplayText = (minutes: number) => {
+    if (minutes === 0) return 'Disabled';
+    if (minutes === 1) return '1 minute';
+    return `${minutes} minutes`;
+  };
 
   const handleBiometricToggle = async (value: boolean) => {
     if (value) {
@@ -156,8 +208,16 @@ export const SettingsScreen = () => {
           <SettingItem
             icon="lock-closed-outline"
             title="Auto-Lock"
-            subtitle="Lock app after inactivity"
-            onPress={() => Alert.alert('Auto-Lock', 'Auto-lock feature coming soon!')}
+            subtitle={getAutoLockDisplayText(autoLockTime)}
+            showArrow={false}
+            rightElement={
+              <Switch
+                value={autoLockEnabled}
+                onValueChange={handleAutoLockToggle}
+                trackColor={{ false: colors.BUTTON, true: colors.BUTTON }}
+                thumbColor="#fff"
+              />
+            }
           />
         </View>
 
