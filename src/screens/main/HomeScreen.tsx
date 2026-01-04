@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, SafeAreaView, Alert, ActivityIndicator, TextInput, Modal, FlatList, Image, ScrollView } from 'react-native';
+import { WebView } from 'react-native-webview';
 import { Text } from '../../components/common/Text';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
@@ -16,11 +17,12 @@ import { encryptFile, getEncryptionKey, hasEncryptionKey, generateEncryptionKey,
 import { uploadFile } from '../../lib/supabase';
 import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
+import RNPDFLib from 'react-native-pdf-lib';
 
 const COLORS = {
   TEXT: '#483847',
   SCREEN_SKIN: '#EFD7ED',
-  BUTTON: '#B378AF',
+  BUTTON: '#b378afff',
   PANEL: '#D7B3D5',
 };
 
@@ -36,6 +38,9 @@ export const HomeScreen = () => {
   const [showFileViewer, setShowFileViewer] = useState(false);
   const [viewingFile, setViewingFile] = useState<any>(null);
   const [fileContent, setFileContent] = useState<string>('');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [selectedFileToDelete, setSelectedFileToDelete] = useState<any>(null);
+  const [isDeletingFile, setIsDeletingFile] = useState(false);
   const { user } = useAuth();
   const navigation = useNavigation();
   
@@ -187,6 +192,71 @@ export const HomeScreen = () => {
     return 'document';
   };
 
+  const handleDeleteFile = async (file: any) => {
+    try {
+      if (!user?.id) {
+        Alert.alert('Error', 'User not authenticated');
+        return;
+      }
+
+      // Set the file to delete and show confirmation modal
+      setSelectedFileToDelete(file);
+      setShowDeleteModal(true);
+    } catch (error) {
+      console.error('Error preparing to delete file:', error);
+      Alert.alert('Error', 'Failed to prepare file deletion');
+    }
+  };
+
+  const confirmDeleteFile = async () => {
+    if (!selectedFileToDelete || !user?.id) {
+      Alert.alert('Error', 'No file selected for deletion');
+      return;
+    }
+
+    setIsDeletingFile(true);
+
+    try {
+      // Delete file from Supabase storage
+      const { error: storageError } = await supabase.storage
+        .from('user-files')
+        .remove([selectedFileToDelete.file_path]);
+
+      if (storageError) {
+        console.error('Error deleting file from storage:', storageError);
+        Alert.alert('Error', 'Failed to delete file from storage');
+        return;
+      }
+
+      // Delete file record from database
+      const { error: dbError } = await supabase
+        .from('files')
+        .delete()
+        .eq('id', selectedFileToDelete.id)
+        .eq('user_id', user.id);
+
+      if (dbError) {
+        console.error('Error deleting file from database:', dbError);
+        Alert.alert('Error', 'Failed to delete file from database');
+        return;
+      }
+
+      // Refresh files list
+      await loadFiles();
+
+      // Close modals and reset state
+      setShowDeleteModal(false);
+      setSelectedFileToDelete(null);
+
+      Alert.alert('Success', 'File deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting file:', error);
+      Alert.alert('Error', 'Failed to delete file');
+    } finally {
+      setIsDeletingFile(false);
+    }
+  };
+
   const handleViewFile = async (file: any) => {
     try {
       if (!user?.id) {
@@ -239,9 +309,23 @@ export const HomeScreen = () => {
       const isValidBase64 = /^[A-Za-z0-9+/]+={0,2}$/.test(decryptedData);
       console.log('Is valid base64:', isValidBase64);
       
-      // Set the viewing file and use the actual temp file URI
+      // For PDFs, use data URI for opening
+      let displayContent = tempUri;
+      if (file.file_name?.match(/\.(pdf)$/i)) {
+        // For PDFs, use data URI for opening
+        const pdfDataUri = `data:application/pdf;base64,${decryptedData}`;
+        console.log('PDF detected, using data URI for opening');
+        displayContent = pdfDataUri;
+      } else {
+        console.log('Using file URI:', displayContent);
+      }
+      
+      // Set the viewing file and use the appropriate content
+      console.log('Setting viewing file:', file);
+      console.log('Setting fileContent type:', typeof displayContent);
+      console.log('Setting fileContent length:', displayContent.length);
       setViewingFile(file);
-      setFileContent(tempUri); // Use the actual temp file URI
+      setFileContent(displayContent);
       setShowFileViewer(true);
 
     } catch (error) {
@@ -280,7 +364,10 @@ export const HomeScreen = () => {
           <Text style={styles.optionText}>View Files</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.optionButton}>
+        <TouchableOpacity style={styles.optionButton} onPress={() => {
+          loadFiles();
+          setShowDeleteModal(true);
+        }}>
           <Text style={styles.optionText}>Delete Files</Text>
         </TouchableOpacity>
       </View>
@@ -289,7 +376,7 @@ export const HomeScreen = () => {
 
   const renderSettings = () => (
     <View style={styles.content}>
-      {/* Settings content will go here */}
+      <Text style={styles.optionText}>Settings functionality coming soon!</Text>
     </View>
   );
 
@@ -307,7 +394,7 @@ export const HomeScreen = () => {
           <Ionicons 
             name="home" 
             size={20} 
-            color={activeTab === 'home' ? '#FFFFFF' : COLORS.TEXT} 
+            color={activeTab === 'home' ? '#FFFFFF' : '#FFFFFF'} 
           />
         </TouchableOpacity>
         
@@ -318,148 +405,311 @@ export const HomeScreen = () => {
           <Ionicons 
             name="settings" 
             size={20} 
-            color={activeTab === 'settings' ? '#FFFFFF' : COLORS.TEXT} 
+            color={activeTab === 'settings' ? '#FFFFFF' : '#FFFFFF'} 
           />
         </TouchableOpacity>
       </View>
 
-      {/* PIN Authentication Modal */}
-      <Modal
-        visible={showPinPrompt}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowPinPrompt(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Enter PIN</Text>
-            <TextInput
-              style={styles.pinInput}
-              value={pinInput}
-              onChangeText={setPinInput}
-              placeholder="Enter your PIN"
-              secureTextEntry
-              keyboardType="numeric"
-              maxLength={6}
-            />
-            <View style={styles.modalButtons}>
+      <>
+        {/* PIN Authentication Modal */}
+        <Modal
+          visible={showPinPrompt}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowPinPrompt(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Enter PIN</Text>
+              <TextInput
+                style={styles.pinInput}
+                value={pinInput}
+                onChangeText={setPinInput}
+                placeholder="Enter your PIN"
+                secureTextEntry
+                keyboardType="numeric"
+                maxLength={6}
+              />
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.cancelButton]} 
+                  onPress={() => {
+                    setShowPinPrompt(false);
+                    setPinInput('');
+                  }}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.confirmButton]} 
+                  onPress={performUpload}
+                >
+                  <Text style={styles.confirmButtonText}>Upload</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* File Viewer Modal */}
+        <Modal
+          visible={showFileViewer}
+          animationType="slide"
+          onRequestClose={() => setShowFileViewer(false)}
+        >
+          <View style={styles.fullScreenViewer}>
+            <View style={styles.fullScreenHeader}>
               <TouchableOpacity 
-                style={[styles.modalButton, styles.cancelButton]} 
-                onPress={() => {
-                  setShowPinPrompt(false);
-                  setPinInput('');
-                }}
+                style={styles.backButton}
+                onPress={() => setShowFileViewer(false)}
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Ionicons name="arrow-back" size={24} color={COLORS.TEXT} />
               </TouchableOpacity>
+              <Text style={styles.fullScreenTitle}>{viewingFile?.file_name}</Text>
+              <View style={styles.headerSpacer} />
+            </View>
+            
+            <ScrollView style={styles.fullScreenBody}>
+              {viewingFile?.file_name?.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                <Image 
+                  source={{ uri: fileContent }}
+                  style={styles.fullScreenImage}
+                  resizeMode="contain"
+                  onError={(error) => console.log('Image error:', error)}
+                  onLoad={() => console.log('Image loaded successfully')}
+                />
+              ) : viewingFile?.file_name?.match(/\.(pdf)$/i) ? (
+                <View style={styles.fullScreenInfoContainer}>
+                  <Ionicons name="document-text" size={80} color={COLORS.BUTTON} />
+                  <Text style={styles.fullScreenInfoText}>PDF Document</Text>
+                  <Text style={styles.fullScreenInfoText}>File Name: {viewingFile?.file_name}</Text>
+                  <Text style={styles.fullScreenInfoText}>Size: {formatFileSize(viewingFile?.size || 0)}</Text>
+                  <Text style={styles.fullScreenInfoText}>Status: Decrypted and ready for viewing</Text>
+                  <Text style={styles.fullScreenInfoText}>The PDF file has been successfully decrypted.</Text>
+                  <TouchableOpacity 
+                    style={styles.openFileButton}
+                    onPress={async () => {
+                      // Save PDF to temporary file and open it
+                      try {
+                        // Create a temporary file with the PDF data
+                        const tempPdfUri = FileSystem.cacheDirectory + 'temp_' + file.file_name;
+                        await FileSystem.writeAsStringAsync(tempPdfUri, decryptedData, {
+                          encoding: FileSystem.EncodingType.Base64,
+                        });
+                        
+                        console.log('PDF saved to temp file:', tempPdfUri);
+                        
+                        // Open the temporary file
+                        await Linking.openURL(tempPdfUri);
+                      } catch (error) {
+                        console.log('Error saving/opening PDF:', error);
+                        Alert.alert('Error', 'Could not open PDF. Please try again.');
+                      }
+                    }}
+                  >
+                    <Text style={styles.openFileButtonText}>Open PDF</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : viewingFile?.file_name?.match(/\.(txt)$/i) ? (
+                <View style={styles.fullScreenTextContainer}>
+                  <Text style={styles.fullScreenText}>{fileContent}</Text>
+                </View>
+              ) : viewingFile?.file_name?.match(/\.(doc|docx|xls|xlsx|ppt|pptx)$/i) ? (
+                <View style={styles.fullScreenInfoContainer}>
+                  <Ionicons name="document-text" size={80} color={COLORS.BUTTON} />
+                  <Text style={styles.fullScreenInfoText}>Document File</Text>
+                  <Text style={styles.fullScreenInfoText}>File Name: {viewingFile?.file_name}</Text>
+                  <Text style={styles.fullScreenInfoText}>Size: {formatFileSize(viewingFile?.size || 0)}</Text>
+                  <Text style={styles.fullScreenInfoText}>Type: {viewingFile?.file_name?.split('.').pop()?.toUpperCase()}</Text>
+                  <TouchableOpacity 
+                    style={styles.openFileButton}
+                    onPress={() => {
+                      // Try to open the document with the system viewer
+                      Linking.openURL(fileContent).catch(error => {
+                        console.log('Error opening document:', error);
+                        Alert.alert('Error', 'Could not open document. No suitable app available.');
+                      });
+                    }}
+                  >
+                    <Text style={styles.openFileButtonText}>Open Document</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.fullScreenInfoContainer}>
+                  <Ionicons name="document" size={80} color={COLORS.BUTTON} />
+                  <Text style={styles.fullScreenInfoText}>File Type: {viewingFile?.mime_type}</Text>
+                  <Text style={styles.fullScreenInfoText}>Size: {formatFileSize(viewingFile?.size || 0)}</Text>
+                  <Text style={styles.fullScreenInfoText}>File Name: {viewingFile?.file_name}</Text>
+                  <TouchableOpacity 
+                    style={styles.openFileButton}
+                    onPress={() => {
+                      // Try to open the file with the system viewer
+                      Linking.openURL(fileContent).catch(error => {
+                        console.log('Error opening file:', error);
+                        Alert.alert('Error', 'Could not open file. No suitable app available.');
+                      });
+                    }}
+                  >
+                    <Text style={styles.openFileButtonText}>Open File</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </Modal>
+
+        {/* Files Modal */}
+        <Modal
+          visible={showFilesModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowFilesModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.filesModalContent}>
+              <Text style={styles.modalTitle}>My Files</Text>
+              {isLoadingFiles ? (
+                <ActivityIndicator size="large" color={COLORS.BUTTON} />
+              ) : files.length === 0 ? (
+                <View style={styles.emptyFilesState}>
+                  <Ionicons name="folder-open-outline" size={60} color={COLORS.TEXT} />
+                  <Text style={styles.emptyFilesText}>No files uploaded yet</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={files}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity 
+                      style={styles.fileItem}
+                      onPress={() => handleViewFile(item)}
+                    >
+                      <View style={styles.fileIconContainer}>
+                        <Ionicons name={getFileIcon(item.mime_type)} size={24} color={COLORS.BUTTON} />
+                      </View>
+                      <View style={styles.fileInfo}>
+                        <Text style={styles.fileName}>{item.file_name}</Text>
+                        <Text style={styles.fileSize}>{formatFileSize(item.size)}</Text>
+                        {item.is_encrypted && (
+                          <View style={styles.encryptedBadge}>
+                            <Ionicons name="lock-closed" size={12} color={COLORS.BUTTON} />
+                            <Text style={styles.encryptedText}>Encrypted</Text>
+                          </View>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                  style={styles.filesList}
+                />
+              )}
               <TouchableOpacity 
-                style={[styles.modalButton, styles.confirmButton]} 
-                onPress={performUpload}
+                style={styles.closeModalButton} 
+                onPress={() => setShowFilesModal(false)}
               >
-                <Text style={styles.confirmButtonText}>Upload</Text>
+                <Text style={styles.closeModalButtonText}>Close</Text>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
 
-      {/* File Viewer Modal */}
-      <Modal
-        visible={showFileViewer}
-        animationType="slide"
-        onRequestClose={() => setShowFileViewer(false)}
-      >
-        <View style={styles.fullScreenViewer}>
-          <View style={styles.fullScreenHeader}>
-            <TouchableOpacity 
-              style={styles.backButton}
-              onPress={() => setShowFileViewer(false)}
-            >
-              <Ionicons name="arrow-back" size={24} color={COLORS.TEXT} />
-            </TouchableOpacity>
-            <Text style={styles.fullScreenTitle}>{viewingFile?.file_name}</Text>
-            <View style={styles.headerSpacer} />
-          </View>
-          
-          <ScrollView style={styles.fullScreenBody}>
-            {viewingFile?.mime_type.startsWith('image/') || viewingFile?.file_name?.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-              <Image 
-                source={{ uri: fileContent }}
-                style={styles.fullScreenImage}
-                resizeMode="contain"
-                onError={(error) => console.log('Image error:', error)}
-                onLoad={() => console.log('Image loaded successfully')}
-              />
-            ) : viewingFile?.mime_type.includes('text') || viewingFile?.file_name?.match(/\.(txt)$/i) ? (
-              <View style={styles.fullScreenTextContainer}>
-                <Text style={styles.fullScreenText}>{fileContent}</Text>
-              </View>
-            ) : (
-              <View style={styles.fullScreenInfoContainer}>
-                <Ionicons name="document" size={80} color={COLORS.BUTTON} />
-                <Text style={styles.fullScreenInfoText}>File Type: {viewingFile?.mime_type}</Text>
-                <Text style={styles.fullScreenInfoText}>Size: {formatFileSize(viewingFile?.size || 0)}</Text>
-                <Text style={styles.fullScreenInfoText}>File Name: {viewingFile?.file_name}</Text>
-                <Text style={styles.fullScreenInfoText}>This file type cannot be displayed within the app.</Text>
-              </View>
-            )}
-          </ScrollView>
-        </View>
-      </Modal>
-
-      {/* Files Modal */}
-      <Modal
-        visible={showFilesModal}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowFilesModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.filesModalContent}>
-            <Text style={styles.modalTitle}>My Files</Text>
-            {isLoadingFiles ? (
-              <ActivityIndicator size="large" color={COLORS.BUTTON} />
-            ) : files.length === 0 ? (
-              <View style={styles.emptyFilesState}>
-                <Ionicons name="folder-open-outline" size={60} color={COLORS.TEXT} />
-                <Text style={styles.emptyFilesText}>No files uploaded yet</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={files}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <TouchableOpacity 
-                    style={styles.fileItem}
-                    onPress={() => handleViewFile(item)}
-                  >
-                    <View style={styles.fileIconContainer}>
-                      <Ionicons name={getFileIcon(item.mime_type)} size={24} color={COLORS.BUTTON} />
-                    </View>
-                    <View style={styles.fileInfo}>
-                      <Text style={styles.fileName}>{item.file_name}</Text>
-                      <Text style={styles.fileSize}>{formatFileSize(item.size)}</Text>
-                      {item.is_encrypted && (
+        {/* Delete Files Modal */}
+        <Modal
+          visible={showDeleteModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowDeleteModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.filesModalContent}>
+              <Text style={styles.modalTitle}>Select File to Delete</Text>
+              {isLoadingFiles ? (
+                <ActivityIndicator size="large" color={COLORS.BUTTON} />
+              ) : files.length === 0 ? (
+                <View style={styles.emptyFilesState}>
+                  <Ionicons name="document" size={40} color={COLORS.TEXT} />
+                  <Text style={styles.emptyFilesText}>No files to delete</Text>
+                </View>
+              ) : (
+                <FlatList
+                  style={styles.filesList}
+                  data={files}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={styles.fileItem}
+                      onPress={() => handleDeleteFile(item)}
+                    >
+                      <View style={styles.fileIconContainer}>
+                        <Ionicons
+                          name={getFileIcon(item.mime_type)}
+                          size={20}
+                          color={COLORS.BUTTON}
+                        />
+                      </View>
+                      <View style={styles.fileInfo}>
+                        <Text style={styles.fileName}>{item.file_name}</Text>
+                        <Text style={styles.fileSize}>{formatFileSize(item.size || 0)}</Text>
                         <View style={styles.encryptedBadge}>
                           <Ionicons name="lock-closed" size={12} color={COLORS.BUTTON} />
                           <Text style={styles.encryptedText}>Encrypted</Text>
                         </View>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                )}
-                style={styles.filesList}
-              />
-            )}
-            <TouchableOpacity 
-              style={styles.closeModalButton} 
-              onPress={() => setShowFilesModal(false)}
-            >
-              <Text style={styles.closeModalButtonText}>Close</Text>
-            </TouchableOpacity>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                />
+              )}
+              <TouchableOpacity
+                style={styles.closeModalButton}
+                onPress={() => setShowDeleteModal(false)}
+              >
+                <Text style={styles.closeModalButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
+
+        {/* Delete Confirmation Modal */}
+        <Modal
+          visible={selectedFileToDelete !== null}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => {
+            setShowDeleteModal(false);
+            setSelectedFileToDelete(null);
+          }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Confirm Delete</Text>
+              <Text style={styles.modalMessage}>
+                Are you sure you want to delete "{selectedFileToDelete?.file_name}"? This action cannot be undone.
+              </Text>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => {
+                    setShowDeleteModal(false);
+                    setSelectedFileToDelete(null);
+                  }}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.confirmButton]}
+                  onPress={confirmDeleteFile}
+                  disabled={isDeletingFile}
+                >
+                  {isDeletingFile ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.confirmButtonText}>Delete</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </>
     </SafeAreaView>
   );
 };
@@ -503,13 +753,17 @@ const styles = StyleSheet.create({
   },
   navButton: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 20,
+    paddingHorizontal: 30,
+    borderRadius: 15,
     alignItems: 'center',
+    backgroundColor: COLORS.BUTTON,
+    marginHorizontal: 10,
   },
   activeNavButton: {
     backgroundColor: COLORS.BUTTON,
-    marginHorizontal: 20,
-    borderRadius: 10,
+    marginHorizontal: 10,
+    borderRadius: 15,
   },
   modalOverlay: {
     flex: 1,
@@ -530,11 +784,18 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   modalTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontFamily: 'Grandstander_700Bold',
     color: COLORS.TEXT,
-    marginBottom: 25,
+    marginBottom: 20,
     textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 16,
+    color: COLORS.TEXT,
+    textAlign: 'center',
+    marginBottom: 30,
+    lineHeight: 24,
   },
   pinInput: {
     width: '100%',
@@ -756,6 +1017,24 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.SCREEN_SKIN,
     minHeight: '100%',
   },
+  fullScreenPdf: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#f0f0f0',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.SCREEN_SKIN,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: COLORS.TEXT,
+    fontFamily: 'Grandstander_700Bold',
+  },
   fullScreenTextContainer: {
     flex: 1,
     padding: 20,
@@ -764,6 +1043,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.TEXT,
     lineHeight: 24,
+  },
+  pdfPreviewContainer: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
+    padding: 15,
+    marginTop: 10,
+    maxHeight: 300,
+  },
+  pdfPreviewText: {
+    fontSize: 12,
+    color: COLORS.TEXT,
+    fontFamily: 'monospace',
+    lineHeight: 16,
   },
   fullScreenInfoContainer: {
     flex: 1,
@@ -778,4 +1071,31 @@ const styles = StyleSheet.create({
     marginTop: 15,
     textAlign: 'center',
   },
-});
+  openPdfButton: {
+    backgroundColor: COLORS.BUTTON,
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  openPdfButtonText: {
+    fontSize: 16,
+    fontFamily: 'Grandstander_700Bold',
+    color: '#FFFFFF',
+  },
+  openFileButton: {
+    backgroundColor: COLORS.BUTTON,
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  openFileButtonText: {
+    fontSize: 16,
+    fontFamily: 'Grandstander_700Bold',
+    color: '#FFFFFF',
+  },
+}
+);
