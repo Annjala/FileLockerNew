@@ -19,6 +19,7 @@ type AuthContextData = {
   signOut: () => Promise<void>;
   setupBiometricAuth: () => Promise<boolean>;
   authenticateWithBiometrics: () => Promise<boolean>;
+  verifyPin: (pin: string) => Promise<boolean>;
 };
 
 const AuthContext = createContext<AuthContextData>({} as AuthContextData);
@@ -177,6 +178,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const verifyPin = async (pin: string): Promise<boolean> => {
+    try {
+      if (!user) {
+        return false;
+      }
+
+      // Get the user's email/username from user metadata
+      const username = user.username;
+      
+      // Try to sign in with the provided PIN to verify it's correct
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: username,
+        password: pin,
+      });
+
+      if (error) {
+        console.error('PIN verification failed:', error);
+        return false;
+      }
+
+      // If successful, the PIN is correct
+      return true;
+    } catch (error) {
+      console.error('Error verifying PIN:', error);
+      return false;
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -188,6 +217,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signOut,
         setupBiometricAuth,
         authenticateWithBiometrics,
+        verifyPin,
       }}
     >
       {children}

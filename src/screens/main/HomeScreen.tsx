@@ -22,6 +22,7 @@ import RNPDFLib from 'react-native-pdf-lib';
 
 export const HomeScreen = () => {
   const { colors } = useTheme();
+  const { user, verifyPin } = useAuth();
   const [selectedFile, setSelectedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showPinPrompt, setShowPinPrompt] = useState(false);
@@ -32,10 +33,14 @@ export const HomeScreen = () => {
   const [showFileViewer, setShowFileViewer] = useState(false);
   const [viewingFile, setViewingFile] = useState<any>(null);
   const [fileContent, setFileContent] = useState<string>('');
+  const [decryptedFileData, setDecryptedFileData] = useState<string>('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [selectedFileToDelete, setSelectedFileToDelete] = useState<any>(null);
   const [isDeletingFile, setIsDeletingFile] = useState(false);
-  const { user } = useAuth();
+  const [pendingFileAction, setPendingFileAction] = useState<{ type: 'view' | 'delete'; file: any } | null>(null);
+  const [showActionPinPrompt, setShowActionPinPrompt] = useState(false);
+  const [actionPinInput, setActionPinInput] = useState('');
+  const [isVerifyingAction, setIsVerifyingAction] = useState(false);
   const navigation = useNavigation();
   
   let [fontsLoaded] = useFonts({
@@ -479,6 +484,15 @@ export const HomeScreen = () => {
         return;
       }
 
+      // Verify the PIN against the user's stored PIN
+      const isPinValid = await verifyPin(pinInput);
+      
+      if (!isPinValid) {
+        Alert.alert('Authentication Failed', 'Invalid PIN. Please try again.');
+        setIsUploading(false);
+        return;
+      }
+
       // Check if encryption key exists
       const keyExists = await hasEncryptionKey(user.id);
       
@@ -572,9 +586,10 @@ export const HomeScreen = () => {
         return;
       }
 
-      // Set the file to delete and show confirmation modal
-      setSelectedFileToDelete(file);
-      setShowDeleteModal(true);
+      // Set pending action and show PIN prompt
+      setPendingFileAction({ type: 'delete', file });
+      setActionPinInput('');
+      setShowActionPinPrompt(true);
     } catch (error) {
       console.error('Error preparing to delete file:', error);
       Alert.alert('Error', 'Failed to prepare file deletion');
@@ -637,14 +652,78 @@ export const HomeScreen = () => {
         return;
       }
 
-      // Get encryption key
-      const encryptionKey = await getEncryptionKey(user.id);
+      // Set pending action and show PIN prompt
+      setPendingFileAction({ type: 'view', file });
+      setActionPinInput('');
+      setShowActionPinPrompt(true);
+    } catch (error) {
+      console.error('Error preparing to view file:', error);
+      Alert.alert('Error', 'Failed to prepare file viewing');
+    }
+  };
+
+  const verifyActionPin = async () => {
+    if (!actionPinInput || actionPinInput.length < 4) {
+      Alert.alert('Error', 'Please enter your PIN');
+      return;
+    }
+
+    if (!pendingFileAction) {
+      Alert.alert('Error', 'No pending action');
+      return;
+    }
+
+    setIsVerifyingAction(true);
+
+    try {
+      // Verify the PIN against the user's stored PIN
+      const isPinValid = await verifyPin(actionPinInput);
       
-      if (!encryptionKey) {
-        Alert.alert('Error', 'Failed to get encryption key');
+      if (!isPinValid) {
+        Alert.alert('Authentication Failed', 'Invalid PIN. Please try again.');
+        setIsVerifyingAction(false);
         return;
       }
 
+      // Close PIN prompt
+      setShowActionPinPrompt(false);
+      setActionPinInput('');
+
+      // Get the encryption key for file operations
+      if (!user?.id) {
+        Alert.alert('Error', 'User not authenticated');
+        setIsVerifyingAction(false);
+        return;
+      }
+      
+      const encryptionKey = await getEncryptionKey(user.id);
+      
+      if (!encryptionKey) {
+        Alert.alert('Error', 'Encryption key not found. Please restart the app.');
+        setIsVerifyingAction(false);
+        return;
+      }
+
+      // Execute the pending action
+      if (pendingFileAction.type === 'view') {
+        await executeViewFile(pendingFileAction.file, encryptionKey);
+      } else if (pendingFileAction.type === 'delete') {
+        setSelectedFileToDelete(pendingFileAction.file);
+        setShowDeleteModal(true);
+      }
+
+      // Clear pending action
+      setPendingFileAction(null);
+    } catch (error) {
+      console.error('Error verifying PIN:', error);
+      Alert.alert('Authentication Failed', 'Invalid PIN. Please try again.');
+    } finally {
+      setIsVerifyingAction(false);
+    }
+  };
+
+  const executeViewFile = async (file: any, encryptionKey: string) => {
+    try {
       // Decrypts file data directly from Supabase (no download needed)
       const { data, error } = await supabase.storage
         .from('user-files')
@@ -699,6 +778,7 @@ export const HomeScreen = () => {
       console.log('Setting fileContent length:', displayContent.length);
       setViewingFile(file);
       setFileContent(displayContent);
+      setDecryptedFileData(decryptedData); // Store decrypted data for PDF handling
       setShowFileViewer(true);
 
     } catch (error) {
@@ -800,17 +880,80 @@ export const HomeScreen = () => {
           </View>
         </Modal>
 
+        {/* Action PIN Verification Modal */}
+        <Modal
+          visible={showActionPinPrompt}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => {
+            setShowActionPinPrompt(false);
+            setPendingFileAction(null);
+            setActionPinInput('');
+          }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>
+                {pendingFileAction?.type === 'view' ? 'Enter PIN to View File' : 'Enter PIN to Delete File'}
+              </Text>
+              <Text style={styles.modalMessage}>
+                File: {pendingFileAction?.file.file_name}
+              </Text>
+              <TextInput
+                style={styles.pinInput}
+                value={actionPinInput}
+                onChangeText={setActionPinInput}
+                placeholder="Enter your PIN"
+                secureTextEntry
+                keyboardType="numeric"
+                maxLength={6}
+              />
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.cancelButton]} 
+                  onPress={() => {
+                    setShowActionPinPrompt(false);
+                    setPendingFileAction(null);
+                    setActionPinInput('');
+                  }}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.confirmButton]} 
+                  onPress={verifyActionPin}
+                  disabled={isVerifyingAction}
+                >
+                  {isVerifyingAction ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.confirmButtonText}>
+                      {pendingFileAction?.type === 'view' ? 'View' : 'Delete'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
         {/* File Viewer Modal */}
         <Modal
           visible={showFileViewer}
           animationType="slide"
-          onRequestClose={() => setShowFileViewer(false)}
+          onRequestClose={() => {
+    setShowFileViewer(false);
+    setDecryptedFileData(''); // Clear decrypted data when closing
+  }}
         >
           <View style={styles.fullScreenViewer}>
             <View style={styles.fullScreenHeader}>
               <TouchableOpacity 
                 style={styles.backButton}
-                onPress={() => setShowFileViewer(false)}
+                onPress={() => {
+    setShowFileViewer(false);
+    setDecryptedFileData(''); // Clear decrypted data when closing
+  }}
               >
                 <Ionicons name="arrow-back" size={24} color={colors.TEXT} />
               </TouchableOpacity>
@@ -841,8 +984,8 @@ export const HomeScreen = () => {
                       // Save PDF to temporary file and open it
                       try {
                         // Create a temporary file with the PDF data
-                        const tempPdfUri = FileSystem.cacheDirectory + 'temp_' + file.file_name;
-                        await FileSystem.writeAsStringAsync(tempPdfUri, decryptedData, {
+                        const tempPdfUri = FileSystem.cacheDirectory + 'temp_' + viewingFile.file_name;
+                        await FileSystem.writeAsStringAsync(tempPdfUri, decryptedFileData, {
                           encoding: FileSystem.EncodingType.Base64,
                         });
                         
