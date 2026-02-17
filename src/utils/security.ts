@@ -75,10 +75,13 @@ export const encryptFile = async (
       key + iv
     );
     
+    // Decode base64 to get original binary data, then XOR encrypt
+    const binaryData = atob(fileContent);
+    
     // XOR encryption with enhanced key
     let encryptedData = '';
-    for (let i = 0; i < fileContent.length; i++) {
-      const charCode = fileContent.charCodeAt(i);
+    for (let i = 0; i < binaryData.length; i++) {
+      const charCode = binaryData.charCodeAt(i);
       const keyChar = enhancedKey.charCodeAt(i % enhancedKey.length);
       encryptedData += String.fromCharCode(charCode ^ keyChar);
     }
@@ -96,7 +99,7 @@ export const encryptFile = async (
   }
 };
 
-// Reversible decryption using XOR with Android Keystore key
+// Simple and reliable decryption using XOR with Android Keystore key
 export const decryptFile = async (
   encryptedData: any, 
   key: string, 
@@ -134,29 +137,18 @@ export const decryptFile = async (
       key + iv
     );
     
-    // Check if it's valid base64 before trying to decode
-    let decodedData = '';
-    try {
-      // Test if it's valid base64
-      atob(dataAsString);
-      decodedData = atob(dataAsString);
-    } catch (e) {
-      // If it's not valid base64, assume it's already decrypted or in different format
-      console.log('Data is not base64, returning as-is:', dataAsString);
-      return dataAsString;
-    }
-    
-    // XOR decryption with enhanced key
+    // Simple XOR decryption on the encrypted data directly
     let decryptedData = '';
-    for (let i = 0; i < decodedData.length; i++) {
-      const charCode = decodedData.charCodeAt(i);
+    for (let i = 0; i < dataAsString.length; i++) {
+      const charCode = dataAsString.charCodeAt(i);
       const keyChar = enhancedKey.charCodeAt(i % enhancedKey.length);
       decryptedData += String.fromCharCode(charCode ^ keyChar);
     }
     
-    // Convert back to base64 for image display
-    // This is crucial for images to display correctly
+    // Convert the decrypted binary data back to base64 for image display
     const base64Decrypted = btoa(decryptedData);
+    
+    console.log('Decryption completed, data length:', base64Decrypted.length);
     
     return base64Decrypted;
   } catch (error) {

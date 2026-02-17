@@ -35,9 +35,10 @@ export const uploadFile = async (fileUri: string, userId: string, encryptionKey:
     // Generate a unique file name
     const fileName = `${userId}/${Date.now()}_${fileUri.split('/').pop()}`;
     
-    // Get file info to determine MIME type
+    // Get file info to determine MIME type and size
     const fileInfo = await FileSystem.getInfoAsync(fileUri);
     const fileExtension = fileUri.split('.').pop()?.toLowerCase();
+    const fileSize = (fileInfo as any).size || 0; // Type assertion for size property
     
     // Determine MIME type based on file extension
     let mimeType = 'application/octet-stream';
@@ -94,7 +95,7 @@ export const uploadFile = async (fileUri: string, userId: string, encryptionKey:
       user_id: userId, 
       file_path: data.path,
       file_name: fileUri.split('/').pop(),
-      size: 0, // File size will be 0 for now since we can't easily get it
+      size: fileSize, // Use actual file size
       mime_type: mimeType,
       is_encrypted: true,
     };
