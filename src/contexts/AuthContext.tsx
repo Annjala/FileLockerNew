@@ -1,9 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
-import { generateEncryptionKey, storeEncryptionKey } from '../utils/security';
+import { generateEncryptionKey, getEncryptionKey, hasEncryptionKey, decryptFile } from '../utils/security';
 
 type User = {
   id: string;
@@ -118,11 +117,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           data: {
             username: username,
           },
-          emailRedirectTo: undefined, // Skip email confirmation
+          emailRedirectTo: undefined,
         },
       });
 
       if (error) throw error;
+      
+      // After successful signup, automatically sign the user in
+      await signIn(username, pin);
       
     } catch (error) {
       console.error('Error signing up:', error);
@@ -142,55 +144,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const setupBiometricAuth = async (): Promise<boolean> => {
-    try {
-      const compatible = await LocalAuthentication.hasHardwareAsync();
-      if (!compatible) {
-        Alert.alert('Error', 'Your device is not compatible with biometric authentication');
-        return false;
-      }
-
-      const enrolled = await LocalAuthentication.isEnrolledAsync();
-      if (!enrolled) {
-        Alert.alert('Error', 'No biometric data found. Please set up biometrics in your device settings.');
-        return false;
-      }
-
-      if (!user) {
-        Alert.alert('Error', 'User not authenticated');
-        return false;
-      }
-
-      // Generate and store encryption key
-      const encryptionKey = await generateEncryptionKey();
-      const keyStored = await storeEncryptionKey(encryptionKey, user.id);
-      
-      if (!keyStored) {
-        Alert.alert('Error', 'Failed to store encryption key');
-        return false;
-      }
-
-      // Store a flag that biometric setup is complete
-      await SecureStore.setItemAsync('biometricSetup', 'true');
-      setIsBiometricSetup(true);
-      return true;
-    } catch (error) {
-      console.error('Error setting up biometric auth:', error);
-      return false;
-    }
+    // We don't need biometric setup for Android Keystore encryption
+    // Keys are generated and stored automatically when needed
+    return true;
   };
 
   const authenticateWithBiometrics = async (): Promise<boolean> => {
-    try {
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Authenticate to access your vault',
-        fallbackLabel: 'Enter password',
-      });
-
-      return result.success;
-    } catch (error) {
-      console.error('Biometric authentication error:', error);
-      return false;
-    }
+    // We don't need biometric authentication for Android Keystore
+    // Only PIN authentication is required for file operations
+    return true;
   };
 
   const verifyPin = async (pin: string): Promise<boolean> => {

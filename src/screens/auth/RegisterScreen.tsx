@@ -4,6 +4,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../../navigation/AuthStack';
 import { useAuth } from '../../contexts/AuthContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as SecureStore from 'expo-secure-store';
 import { Text } from '../../components/common/Text';
 import {
   useFonts,
@@ -81,9 +82,19 @@ export const RegisterScreen = ({ navigation }: Props) => {
     setIsLoading(true);
     try {
       await signUp(username, pin);
-      // Success message is handled in AuthContext
-      // Navigate back to LoginRegister screen
-      navigation.navigate('LoginRegister');
+      // Success! Navigate back to LoginRegister screen
+      Alert.alert(
+        'Registration Successful!', 
+        'Your account has been created successfully. You can now login.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              navigation.navigate('LoginRegister');
+            }
+          }
+        ]
+      );
     } catch (error: any) {
       console.error('Registration error:', error);
       Alert.alert('Registration Failed', error.message || 'An error occurred during registration');

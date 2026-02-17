@@ -30,15 +30,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 });
 
 // Helper function to handle file uploads with encryption
-export const uploadFile = async (fileUri: string, userId: string, encryptionKey: string) => {
+export const uploadFile = async (fileUri: string, userId: string, encryptionKey: string, iv: string) => {
   try {
     // Generate a unique file name
     const fileName = `${userId}/${Date.now()}_${fileUri.split('/').pop()}`;
-    
-    // Read the file content
-    const fileContent = await FileSystem.readAsStringAsync(fileUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
     
     // Get file info to determine MIME type
     const fileInfo = await FileSystem.getInfoAsync(fileUri);
@@ -66,6 +61,11 @@ export const uploadFile = async (fileUri: string, userId: string, encryptionKey:
       mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     }
     
+    // Get the encrypted data from HomeScreen (passed as parameter)
+    // For now, we'll encrypt it here to maintain compatibility
+    const { encryptFile } = require('../utils/security');
+    const { encryptedData } = await encryptFile(fileUri, encryptionKey);
+    
     // Create a simple base64 to ArrayBuffer converter
     const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
       const binaryString = atob(base64);
@@ -76,15 +76,9 @@ export const uploadFile = async (fileUri: string, userId: string, encryptionKey:
       return bytes.buffer;
     };
     
-    // Generate a random IV (Initialization Vector) - in real app this would be used for encryption
-    const iv = 'placeholder_iv_' + Date.now();
-    
-    // In a real app, you would encrypt the file here before uploading
-    // For now, we'll upload the file data directly
-    
     const { data, error } = await supabase.storage
       .from('user-files') // Your Supabase storage bucket name
-      .upload(fileName, base64ToArrayBuffer(fileContent), {
+      .upload(fileName, base64ToArrayBuffer(encryptedData), {
         contentType: mimeType,
       });
 
@@ -95,7 +89,7 @@ export const uploadFile = async (fileUri: string, userId: string, encryptionKey:
     
     console.log('File uploaded to storage successfully:', data.path);
     
-    // Store file metadata in the database
+    // Store file metadata in database (without IV for now)
     const fileMetadata = { 
       user_id: userId, 
       file_path: data.path,

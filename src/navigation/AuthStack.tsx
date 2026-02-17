@@ -26,8 +26,8 @@ export const AuthStack = () => {
         animation: 'slide_from_right',
       }}
     >
-      <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="LoginRegister" component={LoginRegisterScreen} />
+      <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
       <Stack.Screen name="DetectingFace" component={DetectingFaceScreen} />
       <Stack.Screen name="CheckingLiveness" component={CheckingLivenessScreen} />

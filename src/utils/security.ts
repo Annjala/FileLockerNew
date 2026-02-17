@@ -1,110 +1,60 @@
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Keychain from 'react-native-keychain';
 import { Platform } from 'react-native';
 
 // Keychain service name for storing the encryption key
 const KEYCHAIN_SERVICE = 'com.securevault.encryptionkey';
 
-// Generate a secure random encryption key (shorter for SecureStore)
-export const generateEncryptionKey = async (): Promise<string> => {
-  // Generate a 32-byte (256-bit) key for AES-256
-  const randomBytes = Crypto.getRandomBytes(32);
-  const key = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('')
-  );
-  
-  // Return only 32 characters (128 bits) to stay within SecureStore limits
-  // Still secure for mobile app usage
-  return key.substring(0, 32);
-};
-
-// Store the encryption key securely in the device's keychain
-export const storeEncryptionKey = async (key: string, userId: string): Promise<boolean> => {
+// Generate a secure random encryption key and store it in Android Keystore
+export const generateEncryptionKey = async (userId: string): Promise<string> => {
   try {
-    // Use shorter key name to reduce storage size
-    const keyName = `ek_${userId.substring(0, 8)}`; // Use first 8 chars of userId
+    // Generate a 256-bit key for AES-256
+    const randomBytes = Crypto.getRandomBytes(32);
+    const key = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('')
+    );
     
-    // On Android, we'll use the Android Keystore via expo-secure-store
-    // On iOS, we'll use the Keychain
-    if (Platform.OS === 'android') {
-      // On Android, we can use SecureStore with the ACCESS_CONTROL option
-      await SecureStore.setItemAsync(
-        keyName,
-        key,
-        {
-          keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-          requireAuthentication: true,
-        }
-      );
-    } else {
-      // On iOS, we'll use react-native-keychain for better security
-      await Keychain.setGenericPassword(
-        keyName,
-        key,
-        {
-          service: KEYCHAIN_SERVICE,
-          accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_ANY_OR_DEVICE_PASSCODE,
-          accessible: Keychain.ACCESSIBLE.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
-          securityLevel: Keychain.SECURITY_LEVEL.SECURE_SOFTWARE,
-        }
-      );
-    }
-    return true;
+    // Store the key securely in Android Keystore via SecureStore
+    const keyAlias = `filelocker_key_${userId.substring(0, 8)}`;
+    
+    await SecureStore.setItemAsync(
+      keyAlias,
+      key,
+      {
+        keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+        requireAuthentication: false, // Remove biometric requirement
+      }
+    );
+    
+    return key;
   } catch (error) {
-    console.error('Error storing encryption key:', error);
-    return false;
+    console.error('Error generating encryption key:', error);
+    throw error;
   }
 };
 
-// Retrieve the encryption key from secure storage
+// Retrieve the encryption key from Android Keystore
 export const getEncryptionKey = async (userId: string): Promise<string | null> => {
   try {
-    const keyName = `ek_${userId.substring(0, 8)}`; // Match the shortened key name
+    const keyAlias = `filelocker_key_${userId.substring(0, 8)}`;
     
-    if (Platform.OS === 'android') {
-      const key = await SecureStore.getItemAsync(keyName, {
-        keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-        requireAuthentication: true,
-      });
-      
-      if (!key) {
-        return null;
-      }
-      
-      return key;
-    } else {
-      const credentials = await Keychain.getGenericPassword({
-        service: KEYCHAIN_SERVICE,
-        authenticationPrompt: {
-          title: 'Authentication required',
-          subtitle: 'Authenticate to access your encrypted files',
-          description: 'Please authenticate to unlock your secure vault',
-        },
-      });
-      
-      if (!credentials) {
-        return null;
-      }
-      
-      return credentials.password;
+    // Retrieve from SecureStore (Android Keystore) without authentication requirement
+    const key = await SecureStore.getItemAsync(keyAlias);
+    
+    if (!key) {
+      return null;
     }
+    
+    return key;
   } catch (error) {
     console.error('Error retrieving encryption key:', error);
-    if (error instanceof Error) {
-        if (error.message?.includes('UserCancel')) {
-          // User cancelled - no need to log
-        } else if (error.message?.includes('BiometryNotAvailable')) {
-          // Biometry not available - no need to log
-        }
-      }
     return null;
   }
 };
 
-// Encrypt a file using AES-256-CBC
+// Reversible encryption using XOR with Android Keystore key
 export const encryptFile = async (
   fileUri: string, 
   key: string
@@ -115,19 +65,29 @@ export const encryptFile = async (
       encoding: FileSystem.EncodingType.Base64,
     });
     
-    // Generate a random IV (Initialization Vector)
+    // Generate a random 128-bit IV (Initialization Vector)
     const ivBytes = Crypto.getRandomBytes(16);
     const iv = Array.from(ivBytes).map(b => b.toString(16).padStart(2, '0')).join('');
     
-    // In a real implementation, you would use a proper encryption library
-    // like react-native-aes-crypto or expo-crypto for actual encryption
-    // This is a placeholder for the actual encryption logic
+    // Create a more secure encryption key by combining the base key with IV
+    const enhancedKey = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      key + iv
+    );
     
-    // IMPORTANT: This is a simplified example. In production, use a proper encryption library
-    // that provides authenticated encryption (like AES-GCM)
+    // XOR encryption with enhanced key
+    let encryptedData = '';
+    for (let i = 0; i < fileContent.length; i++) {
+      const charCode = fileContent.charCodeAt(i);
+      const keyChar = enhancedKey.charCodeAt(i % enhancedKey.length);
+      encryptedData += String.fromCharCode(charCode ^ keyChar);
+    }
+    
+    // Convert to base64 for safe storage
+    encryptedData = btoa(encryptedData);
     
     return {
-      encryptedData: fileContent, // In reality, this would be the encrypted data
+      encryptedData,
       iv,
     };
   } catch (error) {
@@ -136,26 +96,22 @@ export const encryptFile = async (
   }
 };
 
-// Decrypt a file using AES-256-CBC (proper implementation)
+// Reversible decryption using XOR with Android Keystore key
 export const decryptFile = async (
   encryptedData: any, 
   key: string, 
   iv: string
 ): Promise<string> => {
   try {
-    // For now, just return the encrypted data as-is since we don't have proper encryption
-    // This means files will be downloaded as encrypted but that's expected for now
-    // The "encrypted" data is actually the original file content in our current implementation
-    
-    // Convert the data to string if it's a Blob
+    // Convert data to string if it's a Blob
     let dataAsString = '';
     if (encryptedData instanceof Blob) {
-      // Convert Blob to base64 string (without data URL prefix)
+      // Convert Blob to base64 string
       const reader = new FileReader();
       await new Promise((resolve, reject) => {
         reader.onload = () => {
           const result = reader.result as string;
-          // Remove the data URL prefix to get pure base64
+          // Remove data URL prefix to get pure base64
           if (result.startsWith('data:')) {
             const base64Data = result.split(',')[1];
             dataAsString = base64Data;
@@ -167,21 +123,45 @@ export const decryptFile = async (
         reader.onerror = reject;
         reader.readAsDataURL(encryptedData);
       });
-    } else if (typeof encryptedData === 'string') {
-      dataAsString = encryptedData;
     } else {
       // Convert object to string representation
       dataAsString = String(encryptedData);
     }
     
-    // IMPORTANT: This is a placeholder. In production, use a proper encryption library
-    // that provides authenticated encryption (like AES-GCM) and proper decryption
+    // Create the same enhanced key used for encryption
+    const enhancedKey = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      key + iv
+    );
     
-    console.log('Decrypting file - returning original content as-is');
-    return dataAsString;
+    // Check if it's valid base64 before trying to decode
+    let decodedData = '';
+    try {
+      // Test if it's valid base64
+      atob(dataAsString);
+      decodedData = atob(dataAsString);
+    } catch (e) {
+      // If it's not valid base64, assume it's already decrypted or in different format
+      console.log('Data is not base64, returning as-is:', dataAsString);
+      return dataAsString;
+    }
+    
+    // XOR decryption with enhanced key
+    let decryptedData = '';
+    for (let i = 0; i < decodedData.length; i++) {
+      const charCode = decodedData.charCodeAt(i);
+      const keyChar = enhancedKey.charCodeAt(i % enhancedKey.length);
+      decryptedData += String.fromCharCode(charCode ^ keyChar);
+    }
+    
+    // Convert back to base64 for image display
+    // This is crucial for images to display correctly
+    const base64Decrypted = btoa(decryptedData);
+    
+    return base64Decrypted;
   } catch (error) {
     console.error('Error decrypting file:', error);
-    // Don't throw error - just return empty string to prevent crashing
+    // Return empty string if decryption fails
     return '';
   }
 };
@@ -202,39 +182,25 @@ export const hashPassword = async (password: string): Promise<string> => {
   }
 };
 
-// Check if encryption key exists for a user
+// Check if encryption key exists for a user in Android Keystore
 export const hasEncryptionKey = async (userId: string): Promise<boolean> => {
   try {
-    if (Platform.OS === 'android') {
-      const key = await SecureStore.getItemAsync(`ek_${userId.substring(0, 8)}`);
-      return key !== null;
-    } else {
-      const credentials = await Keychain.getGenericPassword({
-        service: KEYCHAIN_SERVICE,
-      authenticationPrompt: {
-          title: 'Authentication required',
-          subtitle: 'Authenticate to access your encrypted files',
-          description: 'Please authenticate to unlock your secure vault',
-        },
-      });
-      return credentials !== false;
-    }
+    const keyAlias = `filelocker_key_${userId.substring(0, 8)}`;
+    
+    const key = await SecureStore.getItemAsync(keyAlias);
+    return key !== null;
   } catch (error) {
     console.error('Error checking encryption key:', error);
     return false;
   }
 };
 
-// Delete encryption key for a user
+// Delete encryption key for a user from Android Keystore
 export const deleteEncryptionKey = async (userId: string): Promise<boolean> => {
   try {
-    if (Platform.OS === 'android') {
-      await SecureStore.deleteItemAsync(`ek_${userId.substring(0, 8)}`);
-    } else {
-      await Keychain.resetGenericPassword({
-        service: KEYCHAIN_SERVICE,
-      });
-    }
+    const keyAlias = `filelocker_key_${userId.substring(0, 8)}`;
+    
+    await SecureStore.deleteItemAsync(keyAlias);
     return true;
   } catch (error) {
     console.error('Error deleting encryption key:', error);

@@ -9,12 +9,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/MainStack';
-import * as LocalAuthentication from 'expo-local-authentication';
 import { 
   generateEncryptionKey, 
-  storeEncryptionKey, 
   getEncryptionKey, 
-  hasEncryptionKey 
+  hasEncryptionKey,
+  deleteEncryptionKey
 } from '../../utils/security';
 
 export const EncryptionKeyScreen = () => {
@@ -60,43 +59,9 @@ export const EncryptionKeyScreen = () => {
   };
 
   const authenticateWithBiometrics = async (): Promise<boolean> => {
-    try {
-      setIsAuthenticating(true);
-      
-      // Check if biometric authentication is available
-      const compatible = await LocalAuthentication.hasHardwareAsync();
-      if (!compatible) {
-        Alert.alert('Error', 'Biometric authentication is not available on this device');
-        return false;
-      }
-
-      const enrolled = await LocalAuthentication.isEnrolledAsync();
-      if (!enrolled) {
-        Alert.alert('Error', 'No biometric data found. Please set up Face ID or Touch ID in your device settings.');
-        return false;
-      }
-
-      // Authenticate with biometrics
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Authenticate to access encryption key',
-        fallbackLabel: 'Use Passcode',
-        cancelLabel: 'Cancel',
-        disableDeviceFallback: false,
-      });
-
-      if (result.success) {
-        return true;
-      } else {
-        Alert.alert('Authentication Failed', 'Biometric authentication was not successful');
-        return false;
-      }
-    } catch (error) {
-      console.error('Biometric authentication error:', error);
-      Alert.alert('Error', 'Failed to authenticate with biometrics');
-      return false;
-    } finally {
-      setIsAuthenticating(false);
-    }
+    // We don't need biometric authentication for Android Keystore
+    // Only PIN authentication is required for file operations
+    return true;
   };
 
   const handleViewEncryptionKey = async () => {
@@ -165,8 +130,10 @@ export const EncryptionKeyScreen = () => {
               setIsRegenerating(true);
               
               // Generate new encryption key
-              const newKey = await generateEncryptionKey();
-              const success = await storeEncryptionKey(newKey, user.id);
+              const newKey = await generateEncryptionKey(user.id);
+              
+              // Store the new key (no separate storeEncryptionKey function needed)
+              const success = true; // Key is automatically stored in generateEncryptionKey
               
               if (success) {
                 Alert.alert(

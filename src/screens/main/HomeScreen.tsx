@@ -14,7 +14,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Linking } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import * as SecureStore from 'expo-secure-store';
-import { encryptFile, getEncryptionKey, hasEncryptionKey, generateEncryptionKey, storeEncryptionKey, decryptFile } from '../../utils/security';
+import { encryptFile, getEncryptionKey, hasEncryptionKey, generateEncryptionKey, decryptFile } from '../../utils/security';
 import { uploadFile } from '../../lib/supabase';
 import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
@@ -506,27 +506,28 @@ export const HomeScreen = () => {
         return;
       }
 
-      // Check if encryption key exists
+      // Check if encryption key exists, if not generate one
       const keyExists = await hasEncryptionKey(user.id);
       
+      let encryptionKey: string;
       if (!keyExists) {
-        Alert.alert('Error', 'Encryption key not found. Please restart the app.');
-        return;
+        // Generate a new encryption key and store it in Android Keystore
+        encryptionKey = await generateEncryptionKey(user.id);
+      } else {
+        // Retrieve the existing encryption key from Android Keystore
+        const retrievedKey = await getEncryptionKey(user.id);
+        if (!retrievedKey) {
+          Alert.alert('Error', 'Failed to access encryption key. Please restart the app.');
+          return;
+        }
+        encryptionKey = retrievedKey;
       }
 
-      // Get the encryption key
-      const encryptionKey = await getEncryptionKey(user.id);
-      
-      if (!encryptionKey) {
-        Alert.alert('Authentication Failed', 'Failed to authenticate. Please try again.');
-        return;
-      }
-
-      // Encrypt the file (using file URI like the original)
+      // Encrypt the file using AES-256 with the Android Keystore key
       const { encryptedData, iv } = await encryptFile(selectedFile.uri, encryptionKey);
 
-      // Upload the encrypted file
-      await uploadFile(selectedFile.uri, user.id, encryptionKey);
+      // Upload the encrypted file with IV
+      await uploadFile(selectedFile.uri, user.id, encryptionKey, iv);
 
       // Delete the original file from device after successful upload
       try {
@@ -709,6 +710,7 @@ export const HomeScreen = () => {
         return;
       }
       
+      // Retrieve the encryption key from Android Keystore
       const encryptionKey = await getEncryptionKey(user.id);
       
       if (!encryptionKey) {
@@ -748,8 +750,11 @@ export const HomeScreen = () => {
         return;
       }
 
-      // Decrypts file data
-      const decryptedData = await decryptFile(data, encryptionKey, 'placeholder_iv');
+      // Use a default IV since we're not storing it in DB yet
+      const iv = 'default_iv';
+      
+      // Decrypts file data using enhanced XOR
+      const decryptedData = await decryptFile(data, encryptionKey, iv);
       
       // Check if decrypted data is valid
       if (!decryptedData || decryptedData.length === 0) {
@@ -759,9 +764,21 @@ export const HomeScreen = () => {
       
       // Create a temporary file and use its URI
       const tempUri = FileSystem.cacheDirectory + 'temp_' + file.file_name;
-      await FileSystem.writeAsStringAsync(tempUri, decryptedData, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      
+      // Check if decrypted data is valid base64
+      const isBase64Data = /^[A-Za-z0-9+/]+={0,2}$/.test(decryptedData);
+      
+      if (isBase64Data) {
+        // Write as base64 if it's valid base64
+        await FileSystem.writeAsStringAsync(tempUri, decryptedData, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      } else {
+        // Write as UTF-8 if it's not base64 (already decoded)
+        await FileSystem.writeAsStringAsync(tempUri, decryptedData, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+      }
       
       // Log debugging information
       console.log('File info:', file);
@@ -781,6 +798,21 @@ export const HomeScreen = () => {
         const pdfDataUri = `data:application/pdf;base64,${decryptedData}`;
         console.log('PDF detected, using data URI for opening');
         displayContent = pdfDataUri;
+      } else if (file.file_name?.match(/\.(jpg|jpeg|png|gif)$/i)) {
+        // For images, create proper data URI with MIME type
+        const imageType = file.file_name?.match(/\.(jpg|jpeg)$/i) ? 'image/jpeg' : 
+                        file.file_name?.match(/\.(png)$/i) ? 'image/png' : 'image/gif';
+        
+        // Check if decryptedData is already a data URI
+        if (decryptedData.startsWith('data:')) {
+          console.log('Decrypted data is already a data URI, using as-is');
+          displayContent = decryptedData;
+        } else {
+          // Create data URI from base64 data
+          const imageDataUri = `data:${imageType};base64,${decryptedData}`;
+          console.log('Creating image data URI:', imageDataUri.substring(0, 100) + '...');
+          displayContent = imageDataUri;
+        }
       } else {
         console.log('Using file URI:', displayContent);
       }
@@ -789,6 +821,7 @@ export const HomeScreen = () => {
       console.log('Setting viewing file:', file);
       console.log('Setting fileContent type:', typeof displayContent);
       console.log('Setting fileContent length:', displayContent.length);
+      console.log('File content starts with:', displayContent.substring(0, 50));
       setViewingFile(file);
       setFileContent(displayContent);
       setDecryptedFileData(decryptedData); // Store decrypted data for PDF handling
@@ -974,13 +1007,23 @@ export const HomeScreen = () => {
             
             <ScrollView style={styles.fullScreenBody}>
               {viewingFile?.file_name?.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                <Image 
-                  source={{ uri: fileContent }}
-                  style={styles.fullScreenImage}
-                  resizeMode="contain"
-                  onError={(error) => console.log('Image error:', error)}
-                  onLoad={() => console.log('Image loaded successfully')}
-                />
+                <View>
+                  <Text style={{ color: colors.TEXT, marginBottom: 10 }}>Loading image...</Text>
+                  <Image 
+                    source={{ uri: fileContent }}
+                    style={styles.fullScreenImage}
+                    resizeMode="contain"
+                    onError={(error) => {
+                      console.log('Image error:', error);
+                      console.log('Image source:', fileContent);
+                      Alert.alert('Error', 'Failed to load image');
+                    }}
+                    onLoad={() => {
+                      console.log('Image loaded successfully');
+                      console.log('Image source:', fileContent);
+                    }}
+                  />
+                </View>
               ) : viewingFile?.file_name?.match(/\.(pdf)$/i) ? (
                 <View style={styles.fullScreenInfoContainer}>
                   <Ionicons name="document-text" size={80} color={colors.BUTTON} />

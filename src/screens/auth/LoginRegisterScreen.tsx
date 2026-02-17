@@ -28,7 +28,7 @@ export const LoginRegisterScreen = ({ navigation }: Props) => {
   });
 
   const handleRegisterPress = () => {
-    navigation.navigate('DetectingFace');
+    navigation.navigate('Register');
   };
 
   const handleLoginPress = () => {
