@@ -137,7 +137,7 @@ export const decryptFile = async (
       key + iv
     );
     
-    // Simple XOR decryption on the encrypted data directly
+    // Simple XOR decryption on encrypted data directly
     let decryptedData = '';
     for (let i = 0; i < dataAsString.length; i++) {
       const charCode = dataAsString.charCodeAt(i);
@@ -146,7 +146,14 @@ export const decryptFile = async (
     }
     
     // Convert the decrypted binary data back to base64 for image display
-    const base64Decrypted = btoa(decryptedData);
+    let base64Decrypted;
+    try {
+      base64Decrypted = btoa(decryptedData);
+    } catch (error) {
+      console.error('Error converting to base64:', error);
+      // If btoa fails, the data might already be base64
+      base64Decrypted = decryptedData;
+    }
     
     console.log('Decryption completed, data length:', base64Decrypted.length);
     

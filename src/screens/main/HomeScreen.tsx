@@ -14,7 +14,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Linking } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import * as SecureStore from 'expo-secure-store';
-import { encryptFile, getEncryptionKey, hasEncryptionKey, generateEncryptionKey, storeEncryptionKey, decryptFile } from '../../utils/security';
+import { encryptFile, getEncryptionKey, hasEncryptionKey, generateEncryptionKey, decryptFile } from '../../utils/security';
 import { uploadFile } from '../../lib/supabase';
 import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
@@ -506,19 +506,22 @@ export const HomeScreen = () => {
         return;
       }
 
-      // Check if encryption key exists
+      // Check if encryption key exists, generate if missing
       const keyExists = await hasEncryptionKey(user.id);
       
+      let encryptionKey: string;
       if (!keyExists) {
-        Alert.alert('Error', 'Encryption key not found. Please restart the app.');
-        return;
+        // Generate a new encryption key for the user
+        console.log('Generating new encryption key for user:', user.id);
+        encryptionKey = await generateEncryptionKey(user.id);
+      } else {
+        // Retrieve the existing encryption key
+        encryptionKey = await getEncryptionKey(user.id);
       }
-
-      // Get the encryption key
-      const encryptionKey = await getEncryptionKey(user.id);
       
       if (!encryptionKey) {
-        Alert.alert('Authentication Failed', 'Failed to authenticate. Please try again.');
+        Alert.alert('Error', 'Failed to access encryption key. Please try again.');
+        setIsUploading(false);
         return;
       }
 
@@ -531,19 +534,29 @@ export const HomeScreen = () => {
       // Delete the original file from device after successful upload
       try {
         console.log('Attempting to delete file:', selectedFile.uri);
-        await FileSystem.deleteAsync(selectedFile.uri);
-        console.log('File deleted successfully from device');
         
-        // Verify file is actually deleted
-        const fileExists = await FileSystem.getInfoAsync(selectedFile.uri);
-        if (fileExists.exists) {
-          console.warn('Warning: File still exists after deletion attempt');
+        // Check if file exists before deletion
+        const fileInfo = await FileSystem.getInfoAsync(selectedFile.uri);
+        console.log('File exists before deletion:', fileInfo.exists);
+        
+        if (fileInfo.exists) {
+          await FileSystem.deleteAsync(selectedFile.uri);
+          console.log('File deleted successfully from device');
+          
+          // Verify file is actually deleted
+          const fileExistsAfter = await FileSystem.getInfoAsync(selectedFile.uri);
+          if (fileExistsAfter.exists) {
+            console.warn('Warning: File still exists after deletion attempt');
+            Alert.alert('Warning', 'File could not be deleted from device after upload');
+          } else {
+            console.log('Verified: File no longer exists on device');
+          }
         } else {
-          console.log('Verified: File no longer exists on device');
+          console.log('File was already deleted or does not exist');
         }
       } catch (deleteError) {
         console.error('Error deleting original file:', deleteError);
-        Alert.alert('Warning', 'File uploaded but original file could not be deleted');
+        Alert.alert('Warning', 'File uploaded successfully but could not be deleted from device');
       }
 
       Alert.alert('Success', 'File uploaded and encrypted successfully!');
@@ -814,7 +827,17 @@ export const HomeScreen = () => {
       }
 
       // Decrypts file data
-      const decryptedData = await decryptFile(data, encryptionKey, 'placeholder_iv');
+      const iv = file.encryption_iv || 'default_iv';
+      console.log('Using IV for decryption:', iv);
+      
+      let decryptedData = await decryptFile(data, encryptionKey, iv);
+      
+      // If decryption fails with stored IV, try with timestamp-based IV
+      if (!decryptedData || decryptedData.length === 0) {
+        console.log('Decryption failed with stored IV, trying fallback...');
+        const fallbackIv = Date.now().toString(16);
+        decryptedData = await decryptFile(data, encryptionKey, fallbackIv);
+      }
       
       // Check if decrypted data is valid
       if (!decryptedData || decryptedData.length === 0) {
@@ -822,25 +845,34 @@ export const HomeScreen = () => {
         return;
       }
       
+      // Debug: Check if decrypted data looks like valid base64
+      const isValidBase64 = /^[A-Za-z0-9+/]+={0,2}$/.test(decryptedData);
+      console.log('Decrypted data is valid base64:', isValidBase64);
+      console.log('Decrypted data length:', decryptedData.length);
+      console.log('Decrypted data starts with:', decryptedData.substring(0, 50));
+      
+      // For testing: bypass decryption and display image directly from Supabase
+      console.log('Testing with direct Supabase image URL...');
+      
+      // Create direct Supabase storage URL for the image using the actual URL from environment
+      const { data: publicUrlData } = supabase.storage
+        .from('user-files')
+        .getPublicUrl(file.file_path);
+      
+      const supabaseUrl = publicUrlData.publicUrl;
+      console.log('Direct Supabase URL:', supabaseUrl);
+      
       let displayContent = '';
       if (file.file_name?.match(/\.(jpg|jpeg|png|gif)$/i)) {
-        const imageType = file.file_name?.match(/\.(jpg|jpeg)$/i) ? 'image/jpeg' : 
-                        file.file_name?.match(/\.(png)$/i) ? 'image/png' : 'image/gif';
-        
-        const imageDataUri = `data:${imageType};base64,${decryptedData}`;
-        displayContent = imageDataUri;
+        displayContent = supabaseUrl;
       } else {
-        const tempUri = FileSystem.cacheDirectory + 'temp_' + file.file_name;
-        await FileSystem.writeAsStringAsync(tempUri, decryptedData, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        displayContent = tempUri;
+        displayContent = supabaseUrl;
       }
       
       // Set viewing file and use appropriate content
       setViewingFile(file);
       setFileContent(displayContent);
-      setDecryptedFileData(decryptedData);
+      setDecryptedFileData('');
       setShowFileViewer(true);
 
     } catch (error) {
@@ -1023,13 +1055,47 @@ export const HomeScreen = () => {
             
             <ScrollView style={styles.fullScreenBody}>
               {viewingFile?.file_name?.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                <Image 
-                  source={{ uri: fileContent }}
-                  style={styles.fullScreenImage}
-                  resizeMode="contain"
-                  onError={(error) => console.log('Image error:', error)}
-                  onLoad={() => console.log('Image loaded successfully')}
-                />
+                <View style={styles.fullScreenInfoContainer}>
+                  <Text style={{color: 'white', textAlign: 'center', marginBottom: 10}}>
+                    Testing image display...
+                  </Text>
+                  <Text style={{color: 'white', textAlign: 'center', fontSize: 12, marginBottom: 10}}>
+                    Debug: URI starts with {fileContent.substring(0, 30)}
+                  </Text>
+                  <Text style={{color: 'white', textAlign: 'center', fontSize: 12, marginBottom: 10}}>
+                    URI length: {fileContent.length}
+                  </Text>
+                  {/* Test with a simple known valid base64 image */}
+                  <Image 
+                    source={{ uri: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYGBgYJCQg8gA0AAAEQBAIDBAUGBwgKAAAAAAAD/2wBDAAYEBQYGBgYGBgYQg8gA0AAAEQBAIDBAUGBwgZAAAAAQIDBAU2hCYuIiAAAL/8QAtSHQ4c/AAAAAXNSR0IArs4c6QAAAA9JZg==" }}
+                    style={styles.fullScreenImage}
+                    resizeMode="contain"
+                    onError={(error) => {
+                      console.log('Test image error:', error);
+                    }}
+                    onLoad={() => {
+                      console.log('Test image loaded successfully');
+                    }}
+                  />
+                  <Text style={{color: 'white', textAlign: 'center', fontSize: 12, marginTop: 20}}>
+                    --- Actual Image Below ---
+                  </Text>
+                  <Image 
+                    source={{ uri: fileContent }}
+                    style={styles.fullScreenImage}
+                    resizeMode="contain"
+                    onError={(error) => {
+                      console.log('Actual image error:', error);
+                      console.log('Actual image source URI:', fileContent);
+                      console.log('URI length:', fileContent.length);
+                      Alert.alert('Error', 'Failed to load actual image');
+                    }}
+                    onLoad={() => {
+                      console.log('Actual image loaded successfully');
+                      console.log('Actual image source URI:', fileContent);
+                    }}
+                  />
+                </View>
               ) : viewingFile?.file_name?.match(/\.(pdf)$/i) ? (
                 <View style={styles.fullScreenInfoContainer}>
                   <Ionicons name="document-text" size={80} color={colors.BUTTON} />
