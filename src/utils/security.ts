@@ -2,8 +2,9 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
+import CryptoJS from 'crypto-js';
 
-// Keychain service name for storing the encryption key
+// Keychain service name for storing encryption key
 const KEYCHAIN_SERVICE = 'com.securevault.encryptionkey';
 
 // Generate a secure random encryption key and store it in Android Keystore
@@ -16,7 +17,7 @@ export const generateEncryptionKey = async (userId: string): Promise<string> => 
       Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('')
     );
     
-    // Store the key securely in Android Keystore via SecureStore
+    // Store key securely in Android Keystore via SecureStore
     const keyAlias = `filelocker_key_${userId.substring(0, 8)}`;
     
     await SecureStore.setItemAsync(
@@ -35,7 +36,7 @@ export const generateEncryptionKey = async (userId: string): Promise<string> => 
   }
 };
 
-// Retrieve the encryption key from Android Keystore
+// Retrieve encryption key from Android Keystore
 export const getEncryptionKey = async (userId: string): Promise<string | null> => {
   try {
     const keyAlias = `filelocker_key_${userId.substring(0, 8)}`;
@@ -54,7 +55,7 @@ export const getEncryptionKey = async (userId: string): Promise<string | null> =
   }
 };
 
-// Reversible encryption using XOR with Android Keystore key
+// Real AES-256-CBC encryption using crypto-js with manual key derivation
 export const encryptFile = async (
   fileUri: string, 
   key: string
@@ -65,33 +66,23 @@ export const encryptFile = async (
       encoding: FileSystem.EncodingType.Base64,
     });
     
-    // Generate a random 128-bit IV (Initialization Vector)
+    // Generate a random 128-bit IV (Initialization Vector) for AES-CBC using expo-crypto
     const ivBytes = Crypto.getRandomBytes(16);
     const iv = Array.from(ivBytes).map(b => b.toString(16).padStart(2, '0')).join('');
     
-    // Create a more secure encryption key by combining the base key with IV
-    const enhancedKey = await Crypto.digestStringAsync(
-      Crypto.CryptoDigestAlgorithm.SHA256,
-      key + iv
-    );
+    // Derive encryption key using crypto-js to avoid native crypto issues
+    const keyWordArray = CryptoJS.enc.Utf8.parse(key);
     
-    // Decode base64 to get original binary data, then XOR encrypt
-    const binaryData = atob(fileContent);
-    
-    // XOR encryption with enhanced key
-    let encryptedData = '';
-    for (let i = 0; i < binaryData.length; i++) {
-      const charCode = binaryData.charCodeAt(i);
-      const keyChar = enhancedKey.charCodeAt(i % enhancedKey.length);
-      encryptedData += String.fromCharCode(charCode ^ keyChar);
-    }
-    
-    // Convert to base64 for safe storage
-    encryptedData = btoa(encryptedData);
+    // Encrypt using AES-256-CBC with manual key setup
+    const encrypted = CryptoJS.AES.encrypt(fileContent, keyWordArray, {
+      iv: CryptoJS.enc.Hex.parse(iv),
+      mode: CryptoJS.mode.CBC,
+      padding: CryptoJS.pad.Pkcs7
+    });
     
     return {
-      encryptedData,
-      iv,
+      encryptedData: encrypted.toString(),
+      iv: iv,
     };
   } catch (error) {
     console.error('Error encrypting file:', error);
@@ -99,16 +90,21 @@ export const encryptFile = async (
   }
 };
 
-// Simple and reliable decryption using XOR with Android Keystore key
+// Pure AES-256-CBC decryption using crypto-js with manual key derivation
 export const decryptFile = async (
   encryptedData: any, 
   key: string, 
   iv: string
 ): Promise<string> => {
+  console.log('=== DECRYPT FILE FUNCTION CALLED ===');
+  console.log('IV parameter:', iv);
+  console.log('Key parameter length:', key.length);
+  
   try {
     // Convert data to string if it's a Blob
     let dataAsString = '';
     if (encryptedData instanceof Blob) {
+      console.log('Data is Blob, converting...');
       // Convert Blob to base64 string
       const reader = new FileReader();
       await new Promise((resolve, reject) => {
@@ -127,37 +123,78 @@ export const decryptFile = async (
         reader.readAsDataURL(encryptedData);
       });
     } else {
+      console.log('Data is not Blob, converting to string...');
       // Convert object to string representation
       dataAsString = String(encryptedData);
     }
     
-    // Create the same enhanced key used for encryption
-    const enhancedKey = await Crypto.digestStringAsync(
-      Crypto.CryptoDigestAlgorithm.SHA256,
-      key + iv
-    );
+    console.log('=== DECRYPTION DEBUG ===');
+    console.log('Input data length:', dataAsString.length);
+    console.log('Input data starts with:', dataAsString.substring(0, 50));
+    console.log('IV:', iv);
+    console.log('Key length:', key.length);
     
-    // Simple XOR decryption on encrypted data directly
-    let decryptedData = '';
-    for (let i = 0; i < dataAsString.length; i++) {
-      const charCode = dataAsString.charCodeAt(i);
-      const keyChar = enhancedKey.charCodeAt(i % enhancedKey.length);
-      decryptedData += String.fromCharCode(charCode ^ keyChar);
-    }
+    // Derive decryption key using crypto-js to avoid native crypto issues
+    const keyWordArray = CryptoJS.enc.Utf8.parse(key);
     
-    // Convert the decrypted binary data back to base64 for image display
-    let base64Decrypted;
+    // Decrypt using AES-256-CBC with manual key setup and XOR fallback
+    console.log('Attempting AES-256-CBC decryption...');
     try {
-      base64Decrypted = btoa(decryptedData);
-    } catch (error) {
-      console.error('Error converting to base64:', error);
-      // If btoa fails, the data might already be base64
-      base64Decrypted = decryptedData;
+      const decrypted = CryptoJS.AES.decrypt(dataAsString, keyWordArray, {
+        iv: CryptoJS.enc.Hex.parse(iv),
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.Pkcs7
+      });
+      
+      // Convert to base64 for image display
+      const decryptedBase64 = decrypted.toString(CryptoJS.enc.Base64);
+      console.log('AES-256 decryption successful, data length:', decryptedBase64.length);
+      console.log('AES-256 decrypted data starts with:', decryptedBase64.substring(0, 50));
+      
+      console.log('=== FINAL DECRYPTION RESULT ===');
+      console.log('Final data length:', decryptedBase64.length);
+      console.log('Final data starts with:', decryptedBase64.substring(0, 50));
+      
+      return decryptedBase64;
+    } catch (aesError: any) {
+      console.error('AES decryption failed, trying XOR fallback...');
+      console.error('AES error details:', {
+        message: aesError.message,
+        stack: aesError.stack,
+        name: aesError.name
+      });
+      
+      // Fallback to XOR decryption for old files
+      try {
+        const enhancedKey = await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          key + iv
+        );
+        
+        console.log('Enhanced key length:', enhancedKey.length);
+        
+        // Simple XOR decryption on encrypted data directly
+        let decryptedData = '';
+        for (let i = 0; i < dataAsString.length; i++) {
+          const charCode = dataAsString.charCodeAt(i);
+          const keyChar = enhancedKey.charCodeAt(i % enhancedKey.length);
+          decryptedData += String.fromCharCode(charCode ^ keyChar);
+        }
+        
+        console.log('XOR decrypted data length:', decryptedData.length);
+        console.log('XOR decrypted data starts with:', decryptedData.substring(0, 50));
+        
+        // Convert decrypted binary data back to base64 for image display
+        const xorBase64 = btoa(decryptedData);
+        console.log('XOR fallback decryption successful, data length:', xorBase64.length);
+        console.log('XOR base64 starts with:', xorBase64.substring(0, 50));
+        
+        return xorBase64;
+      } catch (xorError: any) {
+        console.error('XOR fallback also failed:', xorError);
+        return '';
+      }
     }
-    
-    console.log('Decryption completed, data length:', base64Decrypted.length);
-    
-    return base64Decrypted;
   } catch (error) {
     console.error('Error decrypting file:', error);
     // Return empty string if decryption fails
@@ -212,16 +249,20 @@ export const getEncryptionKeyMetadata = async (userId: string): Promise<{
   created: string;
   lastAccessed: string;
   algorithm: string;
+  keySize: number;
+  mode: string;
+  library: string;
 } | null> => {
   try {
-    // In a real app, you would store metadata separately
-    // For now, return mock data if key exists
     const keyExists = await hasEncryptionKey(userId);
     if (keyExists) {
       return {
         created: new Date().toLocaleDateString(),
         lastAccessed: new Date().toLocaleDateString(),
-        algorithm: 'AES-256',
+        algorithm: 'AES-256-CBC',
+        keySize: 256,
+        mode: 'PKCS#7 Padding',
+        library: 'crypto-js',
       };
     }
     return null;

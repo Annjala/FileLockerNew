@@ -814,6 +814,11 @@ export const HomeScreen = () => {
   };
 
   const executeViewFile = async (file: any, encryptionKey: string) => {
+    console.log('=== EXECUTE VIEW FILE CALLED ===');
+    console.log('File name:', file.file_name);
+    console.log('File path:', file.file_path);
+    console.log('Encryption key length:', encryptionKey.length);
+    
     try {
       // Decrypts file data directly from Supabase (no download needed)
       const { data, error } = await supabase.storage
@@ -826,18 +831,18 @@ export const HomeScreen = () => {
         return;
       }
 
+      console.log('File downloaded successfully, size:', data.size);
+
       // Decrypts file data
       const iv = file.encryption_iv || 'default_iv';
       console.log('Using IV for decryption:', iv);
       
       let decryptedData = await decryptFile(data, encryptionKey, iv);
       
-      // If decryption fails with stored IV, try with timestamp-based IV
-      if (!decryptedData || decryptedData.length === 0) {
-        console.log('Decryption failed with stored IV, trying fallback...');
-        const fallbackIv = Date.now().toString(16);
-        decryptedData = await decryptFile(data, encryptionKey, fallbackIv);
-      }
+      console.log('=== DECRYPTION RESULTS ===');
+      console.log('Decrypted data length:', decryptedData.length);
+      console.log('Decrypted data starts with:', decryptedData.substring(0, 50));
+      console.log('Is already data URI:', decryptedData.startsWith('data:image/'));
       
       // Check if decrypted data is valid
       if (!decryptedData || decryptedData.length === 0) {
@@ -845,35 +850,40 @@ export const HomeScreen = () => {
         return;
       }
       
-      // Debug: Check if decrypted data looks like valid base64
-      const isValidBase64 = /^[A-Za-z0-9+/]+={0,2}$/.test(decryptedData);
-      console.log('Decrypted data is valid base64:', isValidBase64);
-      console.log('Decrypted data length:', decryptedData.length);
-      console.log('Decrypted data starts with:', decryptedData.substring(0, 50));
-      
-      // For testing: bypass decryption and display image directly from Supabase
-      console.log('Testing with direct Supabase image URL...');
-      
-      // Create direct Supabase storage URL for the image using the actual URL from environment
-      const { data: publicUrlData } = supabase.storage
-        .from('user-files')
-        .getPublicUrl(file.file_path);
-      
-      const supabaseUrl = publicUrlData.publicUrl;
-      console.log('Direct Supabase URL:', supabaseUrl);
-      
+      // Create display content based on file type
       let displayContent = '';
       if (file.file_name?.match(/\.(jpg|jpeg|png|gif)$/i)) {
-        displayContent = supabaseUrl;
+        console.log('=== PROCESSING IMAGE FILE ===');
+        
+        // Always create temporary file for images (like the working sample image)
+        console.log('Creating temporary file for image display');
+        const tempUri = FileSystem.cacheDirectory + 'temp_' + file.file_name;
+        await FileSystem.writeAsStringAsync(tempUri, decryptedData, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        displayContent = tempUri;
+        console.log('Created temporary file:', tempUri);
       } else {
-        displayContent = supabaseUrl;
+        console.log('=== PROCESSING NON-IMAGE FILE ===');
+        // For other files, create a temporary file
+        const tempUri = FileSystem.cacheDirectory + 'temp_' + file.file_name;
+        await FileSystem.writeAsStringAsync(tempUri, decryptedData, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        displayContent = tempUri;
       }
+      
+      console.log('=== SETTING DISPLAY CONTENT ===');
+      console.log('Display content length:', displayContent.length);
+      console.log('Display content starts with:', displayContent.substring(0, 50));
       
       // Set viewing file and use appropriate content
       setViewingFile(file);
       setFileContent(displayContent);
-      setDecryptedFileData('');
+      setDecryptedFileData(decryptedData);
       setShowFileViewer(true);
+      
+      console.log('=== FILE VIEWER OPENED ===');
 
     } catch (error) {
       console.error('Error viewing file:', error);
@@ -1057,42 +1067,32 @@ export const HomeScreen = () => {
               {viewingFile?.file_name?.match(/\.(jpg|jpeg|png|gif)$/i) ? (
                 <View style={styles.fullScreenInfoContainer}>
                   <Text style={{color: 'white', textAlign: 'center', marginBottom: 10}}>
-                    Testing image display...
+                    Loading image...
                   </Text>
                   <Text style={{color: 'white', textAlign: 'center', fontSize: 12, marginBottom: 10}}>
-                    Debug: URI starts with {fileContent.substring(0, 30)}
+                    Debug: URI length = {fileContent.length}
                   </Text>
                   <Text style={{color: 'white', textAlign: 'center', fontSize: 12, marginBottom: 10}}>
-                    URI length: {fileContent.length}
-                  </Text>
-                  {/* Test with a simple known valid base64 image */}
-                  <Image 
-                    source={{ uri: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYGBgYJCQg8gA0AAAEQBAIDBAUGBwgKAAAAAAAD/2wBDAAYEBQYGBgYGBgYQg8gA0AAAEQBAIDBAUGBwgZAAAAAQIDBAU2hCYuIiAAAL/8QAtSHQ4c/AAAAAXNSR0IArs4c6QAAAA9JZg==" }}
-                    style={styles.fullScreenImage}
-                    resizeMode="contain"
-                    onError={(error) => {
-                      console.log('Test image error:', error);
-                    }}
-                    onLoad={() => {
-                      console.log('Test image loaded successfully');
-                    }}
-                  />
-                  <Text style={{color: 'white', textAlign: 'center', fontSize: 12, marginTop: 20}}>
-                    --- Actual Image Below ---
+                    Debug: URI starts with = {fileContent.substring(0, 50)}
                   </Text>
                   <Image 
                     source={{ uri: fileContent }}
                     style={styles.fullScreenImage}
                     resizeMode="contain"
                     onError={(error) => {
-                      console.log('Actual image error:', error);
-                      console.log('Actual image source URI:', fileContent);
-                      console.log('URI length:', fileContent.length);
-                      Alert.alert('Error', 'Failed to load actual image');
+                      console.log('=== IMAGE ERROR DETAILS ===');
+                      console.log('Error:', error);
+                      console.log('File content length:', fileContent.length);
+                      console.log('File content type:', typeof fileContent);
+                      console.log('File content starts with:', fileContent.substring(0, 100));
+                      console.log('File name:', viewingFile?.file_name);
+                      console.log('Expected MIME type:', fileContent.split(':')[1]?.split(';')[0]);
+                      Alert.alert('Image Error', 'Failed to load image. Check console for details.');
                     }}
                     onLoad={() => {
-                      console.log('Actual image loaded successfully');
-                      console.log('Actual image source URI:', fileContent);
+                      console.log('=== IMAGE LOADED SUCCESSFULLY ===');
+                      console.log('Image loaded for file:', viewingFile?.file_name);
+                      console.log('Image URI length:', fileContent.length);
                     }}
                   />
                 </View>
